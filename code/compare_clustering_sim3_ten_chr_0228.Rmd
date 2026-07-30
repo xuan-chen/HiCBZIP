@@ -1,0 +1,881 @@
+---
+title: "compare_clustering_sim3_ten_chr"
+author: "Xuan Chen"
+date: "2026-02-28"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = T)
+rm(list=ls())
+library(tidyverse)
+library(mclust)
+library(umap)
+library(Rtsne)
+library(rstan)
+library(magrittr)
+knitr::opts_knit$set(root.dir = "C:/Users/67402/OneDrive - University of Miami/courses/research/HiC")
+```
+
+
+```{r}
+source("Functions/Functions.R")
+```
+
+```{r}
+lambda_list = c(0.01,0.03,0.05,0.1,0.2,0.3,0.4,0.5,0.7,1)
+set.seed(123456)
+n_rep = 10
+resolution = 50*1e3
+```
+
+
+```{r}
+load("Output/output_251026_sim_HBA_ten_chr_combine/muS_combined_plot_260209.RData")
+```
+
+
+# Functions
+
+```{r}
+# ----------------------------
+# 0) Helpers: get truth labels
+# ----------------------------
+get_cell_type_label <- function(chr_id, true_by_chr, substr_n = 10) {
+  # CHANGE: robust coercion to a single character key
+  chr_key <- as.character(chr_id[1])
+
+  obj <- true_by_chr[[chr_key]]
+  if (is.null(obj)) stop("true_by_chr has no entry for chr = ", chr_key)
+
+  lab <- colnames(obj)
+  if (is.null(lab)) stop("true_by_chr[[", chr_key, "]] has NULL colnames()")
+
+  substr(lab, 1, substr_n)
+}
+
+# -------------------------------------------------
+# 1) Unified normalization (NO "0 -> 1" coercion)
+# -------------------------------------------------
+normalize_unified <- function(mat,
+                              per_cell_scale = TRUE,
+                              log1p_transform = TRUE,
+                              zscore_features = TRUE) {
+  mat2 <- mat
+
+  if (per_cell_scale) {
+    cs <- colSums(mat2)
+    ok <- cs > 0
+    if (any(ok)) {
+      mat2[, ok] <- t(t(mat2[, ok]) / cs[ok])
+    }
+    # leave cs==0 columns as-is (all zeros), don't fake them
+  }
+
+  if (log1p_transform) {
+    # valid for nonnegative continuous too
+    mat2 <- log1p(mat2)
+  }
+
+  if (zscore_features) {
+    mat2 <- t(scale(t(mat2)))
+    mat2[is.na(mat2)] <- 0
+  }
+
+  mat2
+}
+```
+
+```{r}
+# -----------------------------------------
+# 2) Embedding: UMAP or tSNE (cells in rows)
+# -----------------------------------------
+# --------------------------------------------
+# CHANGE: new helper to drop zero-variance features
+# --------------------------------------------
+drop_constant_features <- function(mat, eps = 0) {   # mat is N x K (features x cells)
+  # variance across cells for each feature (row)
+  v <- apply(mat, 1, stats::var)
+  keep <- is.finite(v) & (v > eps)
+  mat2 <- mat[keep, , drop = FALSE]
+  list(mat = mat2, keep = keep)
+}
+
+# --------------------------------------------
+# CHANGE: embed_cells updated to drop constant columns + safer tSNE PCA scaling
+# --------------------------------------------
+embed_cells <- function(mat,
+                        embed_method = c("umap", "tsne"),
+                        n_neighbors = 10,
+                        tsne_perplexity = NULL,
+                        seed = 12345) {
+  embed_method <- match.arg(embed_method)
+
+  # mat: N x K (features x cells)
+  # CHANGE: remove constant/zero-variance features BEFORE transposing
+  dropped <- drop_constant_features(mat)
+  mat_use <- dropped$mat
+
+  # If everything becomes constant -> cannot embed
+  if (nrow(mat_use) == 0) {
+    return(NULL)  # caller handles NULL
+  }
+
+  X <- t(mat_use)  # K x N : cells x features
+
+  set.seed(seed)
+  if (embed_method == "umap") {
+    cfg <- umap.defaults
+    cfg$n_neighbors  <- n_neighbors
+    cfg$random_state <- seed
+    res <- umap(X, config = cfg)
+    emb <- as.data.frame(res$layout)
+    colnames(emb) <- c("X1", "X2")
+    return(emb)
+  } else {
+    K <- nrow(X)
+    if (is.null(tsne_perplexity)) {
+      tsne_perplexity <- min(30, floor((K - 1) / 3))
+      tsne_perplexity <- max(tsne_perplexity, 2)
+    }
+
+    # CHANGE: set pca_scale = FALSE to prevent "rescale constant column" error
+    ts <- Rtsne(
+      X,
+      dims = 2,
+      perplexity = tsne_perplexity,
+      check_duplicates = FALSE,
+      pca = TRUE,
+      pca_scale = FALSE,   # <-- CHANGE
+      verbose = FALSE
+    )
+    emb <- as.data.frame(ts$Y)
+    colnames(emb) <- c("X1", "X2")
+    return(emb)
+  }
+}
+
+```
+
+
+```{r}
+# -------------------------------------------------------
+# 3) One-shot ARI: normalize(optional) → embed → kmeans → ARI
+#    IMPORTANT: ARI computed vs true cell_type_label (robust)
+# -------------------------------------------------------
+# --------------------------------------------
+# CHANGE: compute_ari_one updated to handle emb==NULL
+# --------------------------------------------
+compute_ari_one <- function(mat,
+                            true_labels,
+                            embed_method = c("umap", "tsne"),
+                            normalize = TRUE,
+                            norm_args = list(per_cell_scale=TRUE, log1p_transform=TRUE, zscore_features=TRUE),
+                            n_neighbors = 10,
+                            tsne_perplexity = NULL,
+                            nstart = 10,
+                            seed = 12345) {
+
+  embed_method <- match.arg(embed_method)
+
+  # guard: no information
+  if (all(mat == 0) || stats::sd(as.vector(mat)) == 0) return(NA_real_)
+
+  mat_use <- mat
+  if (normalize) {
+    mat_use <- do.call(normalize_unified, c(list(mat = mat_use), norm_args))
+  }
+
+  emb <- embed_cells(
+    mat_use,
+    embed_method = embed_method,
+    n_neighbors = n_neighbors,
+    tsne_perplexity = tsne_perplexity,
+    seed = seed
+  )
+
+  # CHANGE: if embedding failed (all features constant), return NA
+  if (is.null(emb)) return(NA_real_)
+
+  k <- length(unique(true_labels))
+  set.seed(seed)
+  km <- kmeans(emb, centers = k, nstart = nstart)
+
+  adjustedRandIndex(km$cluster, as.integer(factor(true_labels)))
+}
+
+```
+
+```{r}
+plot_embed_chr_by_coverage <- function(all_models_unified,
+                                      true_by_chr,
+                                      chr_id = 1,
+                                      coverage = NULL,          # NULL = all coverages
+                                      embed_method = c("umap", "tsne"),
+                                      normalize = TRUE,
+                                      norm_args = list(per_cell_scale=TRUE, log1p_transform=TRUE, zscore_features=TRUE),
+                                      n_neighbors = 10,
+                                      tsne_perplexity = NULL,
+                                      nstart = 10,
+                                      seed = 12345,
+                                      model_levels = NULL,      # e.g., final_levels
+                                      ncol = 4,
+                                      point_size = 1) {
+
+  embed_method <- match.arg(embed_method)
+  cell_type_label <- get_cell_type_label(chr_id, true_by_chr)
+
+  chr_dat <- all_models_unified %>% filter(chr == chr_id)
+
+  if (!is.null(coverage)) {
+    chr_dat <- chr_dat %>% filter(coverage == coverage)
+    if (nrow(chr_dat) == 0) stop("No rows for chr=", chr_id, " and coverage=", coverage)
+  }
+
+  # Determine coverage levels to iterate
+  cov_levels <- levels(chr_dat$coverage)
+  if (is.null(cov_levels)) cov_levels <- sort(unique(chr_dat$coverage))
+  if (!is.null(coverage)) cov_levels <- unique(chr_dat$coverage)
+
+  for (covg in cov_levels) {
+
+    dat_cov <- chr_dat %>%
+      filter(coverage == covg)
+
+    if (!is.null(model_levels)) {
+      dat_cov <- dat_cov %>%
+        mutate(model = factor(model, levels = model_levels)) %>%
+        arrange(model)
+    } else {
+      dat_cov <- dat_cov %>% arrange(model)
+    }
+
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    plots <- lapply(seq_along(list_muS_cov), function(i) {
+      mat <- list_muS_cov[[i]]
+      model_name <- names(list_muS_cov)[i]
+
+      # case 1: matrix itself constant/all zero
+      if (all(mat == 0) || stats::sd(as.vector(mat)) == 0) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10, ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text", x = 0, y = 0,
+                     label = "(constant / all zero;\nembedding & ARI not computed)",
+                     size = 4) +
+            labs(title = model_name, subtitle = "ARI: NA") +
+            xlab("X1") + ylab("X2") +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # optional normalization
+      mat_use <- mat
+      if (normalize) {
+        mat_use <- do.call(normalize_unified, c(list(mat = mat_use), norm_args))
+      }
+
+      # ---- CHANGE: embed_cells may return NULL if all features become constant ----
+      emb <- embed_cells(
+        mat_use,
+        embed_method = embed_method,
+        n_neighbors = n_neighbors,
+        tsne_perplexity = tsne_perplexity,
+        seed = seed
+      )
+
+      # ---- CHANGE: handle NULL embedding (e.g., after dropping constant features) ----
+      if (is.null(emb)) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10, ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text", x = 0, y = 0,
+                     label = "(all features constant after preprocessing;\nembedding & ARI not computed)",
+                     size = 4) +
+            labs(title = model_name, subtitle = "ARI: NA") +
+            xlab("X1") + ylab("X2") +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # cluster + ARI
+      k <- length(unique(cell_type_label))
+      set.seed(seed)
+      km <- kmeans(emb, centers = k, nstart = nstart)
+
+      ari_val <- adjustedRandIndex(km$cluster, as.integer(factor(cell_type_label)))
+
+      emb_df <- tibble(
+        X1 = emb$X1,
+        X2 = emb$X2,
+        Cluster = factor(km$cluster),
+        Type = cell_type_label
+      )
+
+      ggplot(emb_df, aes(X1, X2, color = Type, shape = Cluster)) +
+        geom_point(size = point_size) +
+        labs(
+          title = model_name,
+          subtitle = paste0("ARI: ", round(ari_val, 3))
+        ) +
+        theme_minimal() +
+        theme(legend.position = "none")
+    })
+
+    grid.arrange(
+      grobs = plots,
+      ncol = ncol,
+      top = paste0(
+        "chr", chr_id,
+        ", coverage λ = ", covg,
+        " | ", toupper(embed_method),
+        " | ", ifelse(normalize, "normalized", "raw")
+      )
+    )
+  }
+}
+
+```
+
+
+```{r}
+# ----------------------------------------------------------------------
+# 5) Compute ARI for ALL rows in all_models_unified × (UMAP/tSNE × norm/no)
+# ----------------------------------------------------------------------
+calc_ari_all <- function(all_models_unified,
+                         true_by_chr,
+                         embed_methods = c("umap", "tsne"),
+                         normalize_opts = c(FALSE, TRUE),
+                         norm_args = list(per_cell_scale=TRUE, log1p_transform=TRUE, zscore_features=TRUE),
+                         n_neighbors = 10,
+                         tsne_perplexity = NULL,
+                         nstart = 10,
+                         seed = 12345,
+                         model_levels = NULL,
+                         region_info = NULL) {
+
+  combos <- tidyr::crossing(
+    embed_method = embed_methods,
+    normalize = normalize_opts
+  ) %>%
+    mutate(combo = paste0(toupper(embed_method), " | ", ifelse(normalize, "norm", "raw")))
+
+  out <- all_models_unified %>%
+    mutate(row_id = row_number()) %>%
+    tidyr::crossing(combos) %>%
+    mutate(
+      # CHANGE: compute true labels INSIDE pmap; no list-column map(chr, ...)
+      ARI = pmap_dbl(
+        list(muS, chr, embed_method, normalize),
+        function(muS, chr, embed_method, normalize) {
+          true_labels <- get_cell_type_label(chr, true_by_chr)
+
+          compute_ari_one(
+            mat = muS,
+            true_labels = true_labels,
+            embed_method = embed_method,
+            normalize = normalize,
+            norm_args = norm_args,
+            n_neighbors = n_neighbors,
+            tsne_perplexity = tsne_perplexity,
+            nstart = nstart,
+            seed = seed
+          )
+        }
+      )
+    ) %>%
+    select(chr, coverage, model, row_id, embed_method, normalize, combo, ARI)
+
+  if (!is.null(model_levels)) {
+    out <- out %>% mutate(model = factor(model, levels = model_levels))
+  }
+
+  if (!is.null(region_info)) {
+    out <- out %>% left_join(region_info, by = "chr")
+  }
+
+  out
+}
+```
+
+```{r}
+# --------------------------------------------
+# 6) Boxplot comparison (4 combos), facetable
+# --------------------------------------------
+plot_ari_boxplot <- function(ari_long,
+                             facet_by = c("model", "chr", "coverage", "none"),
+                             ncol = 4) {
+  facet_by <- match.arg(facet_by)
+
+  p <- ggplot(ari_long, aes(x = combo, y = ARI)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.15, height = 0, alpha = 0.35, size = 0.8) +
+    labs(
+      x = NULL,
+      y = "ARI (kmeans on 2D embedding)",
+      title = "ARI comparison: UMAP vs tSNE × normalization vs none"
+    ) +
+    theme_classic(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+  if (facet_by != "none") {
+    p <- p + facet_wrap(as.formula(paste0("~", facet_by)), ncol = ncol)
+  }
+
+  p
+}
+
+```
+
+```{r, fig.width=12}
+# ============================================================
+# USAGE EXAMPLES
+# ============================================================
+
+# (A) QUICK TEST: one chr, all coverages, UMAP raw
+plot_embed_chr_by_coverage(all_models_unified, true_by_chr,
+                           chr_id = 1,
+                           embed_method = "umap",
+                           normalize = FALSE,
+                           n_neighbors = n_rep,
+                           nstart = n_rep,
+                           model_levels = final_levels)
+```
+
+```{r, fig.width=12}
+
+# (B) QUICK TEST: one chr, one coverage level (e.g. "1e-03"), tSNE normalized
+plot_embed_chr_by_coverage(all_models_unified, true_by_chr,
+                           chr_id = 10,
+                           coverage = 0.1,
+                           embed_method = "tsne",
+                           normalize = TRUE,
+                           n_neighbors = n_rep,
+                           nstart = n_rep,
+                           model_levels = final_levels)
+
+```
+
+
+```{r}
+# (C) Compute ARI for everything (10 chr × 10 cov × models × 4 combos)
+ari_long <- calc_ari_all(all_models_unified, true_by_chr,
+                         embed_methods = c("umap","tsne"),
+                         normalize_opts = c(FALSE, TRUE),
+                         norm_args = list(per_cell_scale=TRUE, log1p_transform=TRUE, zscore_features=TRUE),
+                         n_neighbors = n_rep,
+                         nstart = n_rep,
+                         seed = 12345,
+                         model_levels = final_levels,
+                         region_info = region_info %>% select(chr, facet_label))
+
+```
+
+```{r, fig.width=15}
+ari_df2 <- ari_long %>%
+  mutate(
+    embed_label = toupper(embed_method),
+    norm_label = ifelse(normalize, "Normalized", "Unnormalized"),
+    facet_label = paste(embed_label, norm_label, sep = " | ")
+  )
+p_ari3 <- ggplot(ari_df2,
+                 aes(x = coverage,
+                     y = ARI,
+                     fill = model,
+                     color = model)) +
+
+  geom_boxplot(outlier.size = 1,
+               width = 0.3,
+               position = position_dodge(width = 0.6),
+               linewidth = 0.3) +
+
+  facet_grid( embed_label ~ norm_label) +
+
+  labs(
+    x = expression(lambda),
+    y = "ARI",
+    title = "ARI Values in Clustering Across Coverage Levels",
+    subtitle = "Comparison of UMAP vs tSNE with and without normalization"
+  ) +
+
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+
+p_ari3
+
+```
+
+## Try more normalization options:
+
+```{r}
+# 0) helper to run one setting and label it
+run_one_norm <- function(norm_label,
+                         normalize_opts,
+                         norm_args = NULL) {
+
+  calc_ari_all(
+    all_models_unified, true_by_chr,
+    embed_methods = c("umap", "tsne"),
+    normalize_opts = normalize_opts,
+    norm_args = if (is.null(norm_args)) list(per_cell_scale=TRUE, log1p_transform=TRUE, zscore_features=TRUE) else norm_args,
+    n_neighbors = n_rep,
+    nstart = n_rep,
+    seed = 12345,
+    model_levels = final_levels,
+    region_info = region_info %>% select(chr, facet_label)
+  ) %>%
+    mutate(norm_label = norm_label)
+}
+
+# A) Raw (no normalization)
+ari_raw <- run_one_norm(
+  norm_label = "None",
+  normalize_opts = c(FALSE)
+)
+
+# B) Log1p only
+ari_log1p <- run_one_norm(
+  norm_label = "Log1p",
+  normalize_opts = c(TRUE),
+  norm_args = list(per_cell_scale = FALSE, log1p_transform = TRUE, zscore_features = FALSE)
+)
+
+# C) Cell-scale + Log1p
+ari_scale_log1p <- run_one_norm(
+  norm_label = "CellScale+Log1p",
+  normalize_opts = c(TRUE),
+  norm_args = list(per_cell_scale = TRUE, log1p_transform = TRUE, zscore_features = FALSE)
+)
+
+# D) Full (your current "normalized")
+ari_full <- run_one_norm(
+  norm_label = "Full (Scale+Log1p+Z)",
+  normalize_opts = c(TRUE),
+  norm_args = list(per_cell_scale = TRUE, log1p_transform = TRUE, zscore_features = TRUE)
+)
+
+# Combine
+ari_all4 <- bind_rows(ari_raw, ari_log1p, ari_scale_log1p, ari_full) %>%
+  mutate(embed_label = toupper(embed_method))
+```
+
+```{r, fig.width=15}
+ari_all4$norm_label = factor(ari_all4$norm_label, levels = c("None", "Log1p", "CellScale+Log1p", "Full (Scale+Log1p+Z)"))
+ggplot(ari_all4,
+                 aes(x = coverage,
+                     y = ARI,
+                     fill = model,
+                     color = model)) +
+
+  geom_boxplot(outlier.size = 1,
+               width = 0.3,
+               position = position_dodge(width = 0.6),
+               linewidth = 0.3) +
+# stat_summary(fun = median,
+#              geom = "point",
+#              position = position_dodge(width = 0.8),
+#              size = 1.8,
+#              shape = 95) +  # thick horizontal line
+  facet_grid( embed_label ~ norm_label) +
+
+  labs(
+    x = expression(lambda),
+    y = "ARI",
+    title = "ARI Values in Clustering Across Coverage Levels",
+    subtitle = "Comparison of UMAP vs tSNE with and without normalization"
+  ) +
+
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+
+```
+
+## Try stratum and truncation
+
+```{r}
+n_bins = 100
+# Compute genomic distance (in bins) for each (i,j) pair
+# distance (in bins) for each upper-tri pair row (N x K matrix)
+compute_stratum_index <- function(n_bins) {
+  ij <- which(upper.tri(matrix(0, n_bins, n_bins)), arr.ind = TRUE)
+  abs(ij[,2] - ij[,1])
+}
+
+# 50kb bins, truncate to <2Mb => 2,000,000 / 50,000 = 40 bins
+max_bin_dist <- 40
+```
+
+
+```{r}
+bandnorm_zscore <- function(mat, stratum_index) {
+  mat2 <- mat
+  for (d in sort(unique(stratum_index))) {
+    idx <- which(stratum_index == d)
+    if (length(idx) < 2) next
+    sub <- mat2[idx, , drop = FALSE]
+    subz <- t(scale(t(sub)))
+    subz[is.na(subz)] <- 0
+    mat2[idx, ] <- subz
+  }
+  mat2
+}
+
+oe_by_band <- function(mat, stratum_index, eps = 1e-12) {
+  mat2 <- mat
+  for (d in sort(unique(stratum_index))) {
+    idx <- which(stratum_index == d)
+    if (length(idx) < 2) next
+    exp_d <- mean(mat2[idx, ], na.rm = TRUE)
+    if (is.finite(exp_d) && exp_d > eps) {
+      mat2[idx, ] <- mat2[idx, ] / exp_d
+    }
+  }
+  mat2
+}
+
+truncate_by_distance <- function(mat, stratum_index, max_bin_dist = 40) {
+  keep <- which(stratum_index <= max_bin_dist)
+  mat[keep, , drop = FALSE]
+}
+```
+
+```{r}
+# Build a distance index ONCE (based on N of your matrices)
+n_bins <- 100
+stratum_index_full <- compute_stratum_index(n_bins)
+
+# For truncation we also need truncated stratum index
+keep_trunc <- which(stratum_index_full <= max_bin_dist)
+stratum_index_trunc <- stratum_index_full[keep_trunc]
+
+# Define transform functions (input: mat N x K, output: transformed mat)
+dist_norm_funs <- list(
+  "BandNorm" = function(mat) {
+    bandnorm_zscore(mat, stratum_index_full)
+  },
+  "OE" = function(mat) {
+    oe_by_band(mat, stratum_index_full)
+  },
+  "Trunc(<2Mb)" = function(mat) {
+    truncate_by_distance(mat, stratum_index_full, max_bin_dist)
+  },
+  "Trunc+BandNorm" = function(mat) {
+    mat2 <- truncate_by_distance(mat, stratum_index_full, max_bin_dist)
+    bandnorm_zscore(mat2, stratum_index_trunc)
+  },
+  "Trunc+OE" = function(mat) {
+    mat2 <- truncate_by_distance(mat, stratum_index_full, max_bin_dist)
+    oe_by_band(mat2, stratum_index_trunc)
+  }
+)
+```
+
+
+```{r}
+calc_ari_all_transform <- function(all_models_unified,
+                                   true_by_chr,
+                                   embed_methods = c("umap","tsne"),
+                                   transform_name = "BandNorm",
+                                   transform_fun,
+                                   n_neighbors = 10,
+                                   tsne_perplexity = NULL,
+                                   nstart = 10,
+                                   seed = 12345,
+                                   model_levels = NULL,
+                                   region_info = NULL) {
+
+  combos <- tidyr::crossing(embed_method = embed_methods) %>%
+    mutate(embed_label = toupper(embed_method),
+           norm_label = transform_name)
+
+  out <- all_models_unified %>%
+    mutate(row_id = row_number()) %>%
+    tidyr::crossing(combos) %>%
+    mutate(
+      ARI = pmap_dbl(
+        list(muS, chr, embed_method),
+        function(muS, chr, embed_method) {
+
+          true_labels <- get_cell_type_label(chr, true_by_chr)
+
+          # apply distance-aware transform
+          mat_use <- transform_fun(muS)
+
+          # embed (your embed_cells already handles constant-feature issues)
+          emb <- embed_cells(
+            mat_use,
+            embed_method = embed_method,
+            n_neighbors = n_neighbors,
+            tsne_perplexity = tsne_perplexity,
+            seed = seed
+          )
+          if (is.null(emb)) return(NA_real_)
+
+          k <- length(unique(true_labels))
+          set.seed(seed)
+          km <- kmeans(emb, centers = k, nstart = nstart)
+
+          adjustedRandIndex(km$cluster, as.integer(factor(true_labels)))
+        }
+      )
+    ) %>%
+    transmute(chr, coverage, model, row_id,
+              embed_method,
+              embed_label,
+              norm_label,
+              ARI)
+
+  if (!is.null(model_levels)) out <- out %>% mutate(model = factor(model, levels = model_levels))
+  if (!is.null(region_info))  out <- out %>% left_join(region_info, by = "chr")
+  out
+}
+```
+
+```{r}
+ari_dist <- purrr::imap_dfr(dist_norm_funs, function(fun, nm) {
+  calc_ari_all_transform(
+    all_models_unified, true_by_chr,
+    embed_methods = c("umap","tsne"),
+    transform_name = nm,
+    transform_fun = fun,
+    n_neighbors = n_rep,
+    nstart = n_rep,
+    seed = 12345,
+    model_levels = final_levels,
+    region_info = region_info %>% select(chr, facet_label)
+  )
+})
+
+# Combine global + distance-aware
+ari_compare_all <- bind_rows(
+  ari_all4 %>% mutate(embed_label = toupper(embed_method)),
+  ari_dist
+)
+```
+
+```{r}
+ari_compare_all$norm_label %>% table()
+```
+
+
+```{r, fig.width=15}
+p_compare <- ggplot(ari_compare_all %>% filter(norm_label %in% c("None", "Log1p", "BandNorm", "OE")) %>%
+                      mutate(norm_label = factor(norm_label, levels = c("None", "Log1p", "BandNorm", "OE"))),
+                    aes(x = coverage, y = ARI, fill = model, color = model)) +
+  geom_boxplot(outlier.size = 0.8,
+               width = 0.6,
+               position = position_dodge(width = 0.8),
+               linewidth = 0.6,
+               alpha = 0.7) +
+  facet_grid( embed_label ~ norm_label) +
+  labs(
+    x = expression(lambda),
+    y = "ARI",
+    title = "ARI across coverage levels",
+    subtitle = "Global vs distance-aware normalizations; UMAP vs tSNE"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+
+p_compare
+```
+
+```{r, fig.width=15}
+p_compare <- ggplot(ari_compare_all %>% filter(norm_label %in% c("None", "Log1p", "Trunc(<2Mb)", "OE", "Trunc+OE")) %>%
+                      mutate(norm_label = factor(norm_label, levels = c("None", "Log1p", "Trunc(<2Mb)", "OE", "Trunc+OE"))),
+                    aes(x = coverage, y = ARI, fill = model, color = model)) +
+  geom_boxplot(outlier.size = 0.8,
+               width = 0.6,
+               position = position_dodge(width = 0.8),
+               linewidth = 0.6,
+               alpha = 0.7) +
+  facet_grid( embed_label ~ norm_label) +
+  labs(
+    x = expression(lambda),
+    y = "ARI",
+    title = "ARI across coverage levels",
+    subtitle = "Global vs distance-aware normalizations; UMAP vs tSNE"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+
+p_compare
+```
+
+```{r, fig.width=15}
+ggplot(ari_compare_all,
+                    aes(x = norm_label, y = ARI, fill = model, color = model)) +
+  geom_boxplot(outlier.size = 0.8,
+               width = 0.6,
+               position = position_dodge(width = 0.8),
+               linewidth = 0.6,
+               alpha = 0.7) +
+  facet_grid(~embed_label) +
+  labs(
+    x = expression(lambda),
+    y = "ARI",
+    title = "ARI across coverage levels",
+    subtitle = "Global vs distance-aware normalizations; UMAP vs tSNE"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+
+```
+
+
+
+#### Embedding Methods
+
+- UMAP and tSNE showed broadly comparable performance across all simulation settings.
+- No consistent or substantial advantage of one embedding method over the other was observed after aggregating results across chromosomes and coverage levels.
+- Therefore, embedding choice was not the primary driver of clustering performance differences.
+
+#### Normalization Methods Evaluated 
+
+
+- None (raw)
+- Log1p transformation
+- CellScale + Log1p
+- Full normalization (Scale + Log1p + Z-score)
+
+- BandNorm (distance-stratum z-score)
+- Observed/Expected (O/E)
+- Truncated at <2Mb (40bins), only keeping near diagonal elements
+
+#### Key Findings
+
+- Log1p and O/E were the only normalization methods that consistently improved ARI compared to no normalization.
+- Full normalization (including z-scoring) often reduced performance, suggesting that over-normalization removed biologically meaningful signal.
+- BandNorm and truncation-based strategies did not provide consistent improvements when performance was aggregated across all coverage levels.
+- Log1p performed as well as or slightly better than O/E while being simpler and more stable across models.
+
+
