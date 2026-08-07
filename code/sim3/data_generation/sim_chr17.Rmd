@@ -1,0 +1,265 @@
+---
+title: "Preprocessing Real Data for 3 cells from snm3Cseq, whole chr17"
+subtitle: "Simulate 10 scHiC for each of first 3 cells"
+author: "Xuan Chen"
+date: "2025-02-05"
+output: html_document
+---
+
+```{r, include=FALSE}
+setwd("C:/Users/67402/OneDrive - University of Miami/courses/research/HiC")
+rm(list=ls())
+library(data.table)
+library(HiCImpute)
+library(tidyverse)
+source("Functions/Functions.R")
+```
+
+# 0. Set Resolution and Chromosome
+
+```{r}
+resolution = 50*1e3
+chrom = 17
+```
+
+
+# 1. Get Real scHi-C data (first three, then each simulate 10 single cells)
+
+```{r}
+setwd("C:/Users/67402/OneDrive - University of Miami/courses/research/HiC/Data/Methylation_Hi-C_data/Hi_C/Contact")
+contact_files <- list.files(path = paste0("contacts_chr",chrom,"/"), full.names = TRUE)[1:3]
+n_rep = 10
+contact_files = rep(contact_files, each = n_rep)
+  
+GSM_codes <- sub(".*/(GSM[0-9]+).*", "\\1", contact_files)
+list_real_pair = lapply(contact_files, data.table::fread)
+GSM_codes
+summary(list_real_pair[[1]])
+summary(list_real_pair[[11]])
+summary(list_real_pair[[21]])
+```
+
+```{r, warning=F}
+set.seed(123456)
+max_row = sapply(GSM_codes, function(GSM){
+  SCL_file = paste0("C:/Users/67402/OneDrive - University of Miami/courses/research/HiC/Data/Methylation_Hi-C_data/Hi_C/SCL/scl_chr",chrom, "/SCL_", GSM)
+  temp = data.table::fread(SCL_file)
+  return(nrow(temp))
+}) %>% min()
+
+list_sim_scHiCImpute = sapply(GSM_codes, function(GSM){
+  SCL_file = paste0("C:/Users/67402/OneDrive - University of Miami/courses/research/HiC/Data/Methylation_Hi-C_data/Hi_C/SCL/scl_chr",chrom, "/SCL_", GSM)
+  temp = data.table::fread(SCL_file)
+  # Use mimimum row id
+  temp = temp[1:max_row,-1] %>% as.matrix()
+  sim_scHiCImpute <- simulate_mu_from_3Dcoords(temp)
+  # print(paste0("Done! ", GSM))
+  return(sim_scHiCImpute)
+})
+```
+
+
+```{r, warning=F, message=F}
+
+colnames(list_sim_scHiCImpute) = paste0(GSM_codes, rep(paste0("_rep", 1:n_rep), 3))
+N = nrow(list_sim_scHiCImpute) # 12422620
+K = ncol(list_sim_scHiCImpute) # 30
+n = (1 + sqrt(1 + 8*N)) / 2 # 4985
+max_size = resolution*n # 249250000
+
+list_real_mtx = lapply(list_real_pair, function(pair) pair_to_mtx(pair %>% filter(V1 <= max_size, V2 <= max_size), 
+                                                                  size = max_size, res = resolution))
+real_mtx_long = sapply(list_real_mtx, matrix2D_to_matrix_long, include.diag = F)
+rm(list_real_mtx)
+```
+
+
+# 2. Get Simulated mu and pi
+
+```{r}
+max_dist = 5e6 # 10M
+max_bin = max_dist / resolution # 100
+
+idx_mtx = outer(1:n, 1:n, FUN = function(i,j) abs(i-j)<=max_bin)
+diag(idx_mtx) = FALSE
+idx_mtx_long = idx_mtx[lower.tri(idx_mtx,diag = F)]
+
+true_mu = list_sim_scHiCImpute[idx_mtx_long,]
+true_mu[true_mu == Inf] = 0
+```
+
+
+```{r}
+N = nrow(true_mu)
+true_pi_mean = (1 - exp((true_mu)) / (1+exp((true_mu))))
+eps = 0.3; plus = 0.2
+true_pi = matrix(runif(N*K, min = pmax(0,true_pi_mean - eps + plus), max = pmin(1, true_pi_mean + eps + plus)), N, K)
+# hist(true_pi) 
+true_S = matrix(rbinom(N*K, 1, true_pi), N, K)
+true_muS = true_mu * (1-true_S)
+coverage = 0.3
+sim_y = matrix(rpois(N*K, lambda = coverage*true_muS),N,K)
+mean(sim_y)
+mean(sim_y == 0)
+mean(true_S)
+```
+
+The first two cells of each group, where group is defined by the true real SCL used for simulation
+
+```{r}
+pca_results <- prcomp(t(sim_y))  # scale. = TRUE standardizes the variables
+print(summary(pca_results))
+```
+
+
+```{r}
+library(Rtsne)
+library(mclust)
+par(mfrow = c(1,2))
+
+set.seed(123456)
+npc = 20; pplx = 8; 
+
+
+tsne_results <- Rtsne(t(true_muS), initial_dims = npc, perplexity = pplx,  theta = 0, pca_center = F)
+kmeans_results <- kmeans(tsne_results$Y, centers = 3, nstart = n_rep)
+ari_value = adjustedRandIndex(rep(1:3, each = n_rep), kmeans_results$cluster)
+plot_title <- paste("True muS - ARI:", round(ari_value, 3))
+plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = rep(1:3, each = n_rep))
+# plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = kmeans_results$cluster, cex = 0.5)
+
+
+tsne_results <- Rtsne(t(sim_y), initial_dims = npc, perplexity = pplx,  theta = 0, pca_center = F)
+kmeans_results <- kmeans(tsne_results$Y, centers = 3, nstart = n_rep)
+ari_value <- adjustedRandIndex(rep(1:3, each = n_rep), kmeans_results$cluster)
+plot_title <- paste("Simulated Raw scHiC - ARI:", round(ari_value, 3))
+plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = rep(1:3, each = n_rep))
+```
+
+
+
+# sample a region
+
+```{r}
+set.seed(42*chrom)
+start_bp = sample(seq(1,(max_size-5e6)/5e6),1) * 5e6
+end_bp = start_bp + 5e6
+print(c(start_bp/1e6, end_bp/1e6))
+bin_range = ceiling((start_bp+1)/resolution):ceiling(end_bp/resolution)
+```
+
+```{r}
+mat_long_to_heatmaps(true_mu[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)] %>% apply(., 2, matrix_long_maxdist_to_matrix_long, n=n, idx_mtx_long=idx_mtx_long), 
+                     bin_range = bin_range, n_plot = 6, maxi = 5, title = "(Simulated) True Mu", tick_by = 10)
+# mat_long_to_heatmaps(true_pi[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)] %>% apply(., 2, matrix_long_maxdist_to_matrix_long, n=n, idx_mtx_long=idx_mtx_long), 
+#                      bin_range = bin_range, n_plot = 6, maxi = 5, pi_S = T, title = "(Simulated) True pi", tick_by = 40)
+# mat_long_to_heatmaps(true_S[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)] %>% apply(., 2, matrix_long_maxdist_to_matrix_long, n=n, idx_mtx_long=idx_mtx_long), 
+#                      bin_range = bin_range, n_plot = 6, maxi = 5, pi_S = T, title = "(Simulated) True S", tick_by = 40)
+mat_long_to_heatmaps(true_muS[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)] %>% apply(., 2, matrix_long_maxdist_to_matrix_long, n=n, idx_mtx_long=idx_mtx_long), 
+                     bin_range = bin_range, n_plot = 6, maxi = 5, title = "True (Simulated) Mu*(1-S)", tick_by = 10)
+mat_long_to_heatmaps(sim_y[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)] %>% apply(., 2, matrix_long_maxdist_to_matrix_long, n=n, idx_mtx_long=idx_mtx_long), 
+                     bin_range = bin_range, n_plot = 6, maxi = 5, title = "Simulated y", tick_by = 10)
+```
+
+# 3. Extract, set Lambda and Simulate y 
+
+
+```{r}
+original_sim = list(true_mu = true_mu, true_pi = true_pi,
+                    true_S = true_S, true_muS = true_muS)
+```
+
+```{r}
+idx_info = expand.grid(i=1:n,j=1:n) %>%
+  filter(i>j)
+idx_info$old = idx_mtx_long
+
+max_dist = 5e6
+coverage = 0.3
+
+n = max_size/resolution
+N = n*(n-1)/2
+
+idx_info = idx_info %>%
+  mutate(in_range = (i>=start_bp/resolution+1 & i<=end_bp/resolution & j>=start_bp/resolution+1 & j<=end_bp/resolution),
+         in_dist = abs(i-j)<=max_dist/resolution,
+         new = old & in_range & in_dist)
+id_extract = idx_info %>%
+  filter(old) %>%
+  pull(new)
+table(id_extract)
+idx_mtx_long = idx_info$new
+
+true_mu = true_mu[id_extract,]
+true_pi = true_pi[id_extract,]
+true_S = true_S[id_extract,]
+true_muS = true_muS[id_extract,]
+```
+
+
+```{r}
+set.seed(123456)
+N = nrow(true_muS) # 12422620
+K = ncol(true_muS) # 30
+n = (1 + sqrt(1 + 8*N)) / 2 # 4985
+
+mean(sim_y)
+mean(sim_y == 0)
+mean(true_S)
+sim_y = matrix(rpois(nrow(true_muS)*ncol(true_muS), lambda = coverage*true_muS),nrow(true_muS),ncol(true_muS))
+mean(sim_y)
+mean(sim_y == 0)
+mean(true_S)
+```
+
+
+```{r}
+tick_by = 10
+mat_long_to_heatmaps(true_mu[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)], n_plot = 6, maxi = 5, title = "(Simulated) True Mu")
+mat_long_to_heatmaps(true_pi[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)], n_plot = 6, maxi = 5, pi_S = T, title = "(Simulated) True pi")
+mat_long_to_heatmaps(true_S[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)],n_plot = 6, maxi = 5, pi_S = T, title = "(Simulated) True S", )
+mat_long_to_heatmaps(true_muS[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)], n_plot = 6, maxi = 5, title = "True (Simulated) Mu*(1-S)")
+mat_long_to_heatmaps(sim_y[,c(1,1,1,2,2,2)+c(0,n_rep,2*n_rep,0,n_rep,2*n_rep)], n_plot = 6, maxi = 5, title = "Simulated y")
+```
+
+```{r}
+pca_results <- prcomp(t(sim_y))  # scale. = TRUE standardizes the variables
+print(summary(pca_results))
+
+par(mfrow = c(1,2))
+
+set.seed(123456)
+npc = 20; pplx = 8; 
+
+tsne_results <- Rtsne(t(true_muS), initial_dims = npc, perplexity = pplx,  theta = 0, pca_center = F)
+kmeans_results <- kmeans(tsne_results$Y, centers = 3, nstart = n_rep)
+ari_value = adjustedRandIndex(rep(1:3, each = n_rep), kmeans_results$cluster)
+plot_title <- paste("True muS - ARI:", round(ari_value, 3))
+plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = rep(1:3, each = n_rep))
+# plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = kmeans_results$cluster, cex = 0.5)
+
+
+tsne_results <- Rtsne(t(sim_y), initial_dims = npc, perplexity = pplx,  theta = 0, pca_center = F)
+kmeans_results <- kmeans(tsne_results$Y, centers = 3, nstart = n_rep)
+ari_value <- adjustedRandIndex(rep(1:3, each = n_rep), kmeans_results$cluster)
+plot_title <- paste("Simulated Raw scHiC - ARI:", round(ari_value, 3))
+plot(tsne_results$Y, main = plot_title,  xlab = "", ylab = "", pch = 19, col = rep(1:3, each = n_rep))
+```
+
+```{r}
+setwd("C:/Users/67402/OneDrive - University of Miami/courses/research/HiC/Data/Methylation_Hi-C_data/sim_HBA3_random_chr/")
+save(GSM_codes, list_real_pair, real_mtx_long,
+     resolution, bin_range,
+     n, N, K, coverage, n_rep,
+     max_dist, idx_mtx_long,
+     original_sim,
+     true_mu, true_pi, true_S, true_muS, sim_y,
+     # input_CTCF, input_met_CG, input_met_CH,
+     file = paste0("Simulation_snm3Cseq_human_brian_astrocytes_", resolution/1000, "k_chr", chrom,"_",start_bp/1e6,"M_",end_bp/1e6,"M_md", max_dist/1e6, "M_K3X10.RData"))
+```
+
+
+
+
+
+

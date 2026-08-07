@@ -1,0 +1,838 @@
+---
+title: "Flayamer Benchmark: Raw vs HiCBZIP-GB(NB)"
+author: "Codex + User"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = TRUE, message = TRUE, fig.width = 12, fig.height = 6)
+set.seed(12345)
+```
+
+## 1) Libraries and Paths
+
+```{r libs}
+required_pkgs <- c(
+  "Matrix", "dplyr", "readr", "tibble", "ggplot2",
+  "uwot", "mclust", "tidyr", "purrr"
+)
+
+missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_pkgs) > 0) {
+  stop(
+    "Missing packages: ", paste(missing_pkgs, collapse = ", "),
+    "\nInstall them first, e.g. install.packages(missing_pkgs)."
+  )
+}
+
+library(Matrix)
+library(dplyr)
+library(readr)
+library(tibble)
+library(ggplot2)
+library(uwot)
+library(mclust)
+library(tidyr)
+library(purrr)
+
+proj_dir <- normalizePath(".", winslash = "/", mustWork = TRUE)
+data_root <- file.path(proj_dir, "data", "raw", "flayamer")
+out_dir <- file.path(proj_dir, "outputs", "flayamer_benchmark")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+source(file.path(proj_dir, "R", "helpers_ramani_io.R"))
+source(file.path(proj_dir, "R", "helpers_embedding.R"))
+source(file.path(proj_dir, "previous_R_code_example", "BHZIP_EB_250911.R"))
+source(file.path(proj_dir, "previous_R_code_example", "Functions.R"))
+
+cat("Project dir:", proj_dir, "\n")
+cat("Data root:", data_root, "\n")
+cat("Output dir:", out_dir, "\n")
+
+if (!dir.exists(data_root)) {
+  stop("Flayamer data directory not found: ", data_root)
+}
+```
+
+## 2) Config
+
+```{r config}
+cfg <- list(
+  seed = 12345,
+  run_full = TRUE,
+  matrix_file_override = file.path(data_root, "GSE305523_reanalysis_GSE80006_oocyte_zygote", "oocyte_zygote", "oocyte_zygote_1M.scool"),
+  metadata_file_override = NA_character_,
+  target_chromosomes = NA,
+  # QC
+  qc_min_depth = 5000,
+  qc_depth_col = "depth",
+  qc_cis_min_contacts = NULL,
+  # Imputation
+  bzip_r = 1,
+  bzip_threshold = 3,
+  bzip_B = 10,
+  bzip_include_diag = TRUE,
+  use_imputation_cache = FALSE,
+  # Embedding (InnerProduct only)
+  embedding_pipelines = c(
+    "paper_innerproduct_mds_fixed",
+    "paper_innerproduct_mds_2M",
+    "paper_innerproduct_mds_5M",
+    "paper_innerproduct_mds_10M",
+    "paper_innerproduct_mds_20M",
+    "paper_innerproduct_mds_30M",
+    "paper_innerproduct_mds_50M"
+  ),
+  innerproduct_max_ranges_mb = c(2, 5, 10, 20, 30, 50),
+  innerproduct_n_strata = 10L,
+  schi_pcs_per_chr = 10,
+  npc = 10,
+  k_nstart = 50,
+  # Fair/common robustness for evaluation
+  embedding_eval_cov_q = c(0, 1),
+  run_heatmap = TRUE,
+  # Additional paper-style chromosome QC (minimum cis-contacts per chromosome)
+  qc_chr_min_contacts_by_chr_mb = TRUE,
+  qc_chr_exclude = c("chrX", "chrY")
+)
+set.seed(cfg$seed)
+```
+
+## 3) Detect Flayamer Files
+
+```{r detect_files}
+all_files <- list.files(data_root, recursive = TRUE, full.names = TRUE)
+if (length(all_files) == 0) stop("No files found under ", data_root)
+
+meta_candidates <- all_files[
+  grepl("\\.(tsv|tsv\\.gz|csv|csv\\.gz)$", tolower(all_files)) &
+    grepl("meta|metadata|label|annot", tolower(basename(all_files)))
+]
+
+metadata_file <- if (!is.na(cfg$metadata_file_override)) {
+  cfg$metadata_file_override
+} else if (length(meta_candidates) > 0) {
+  sort(unique(meta_candidates))[[1]]
+} else {
+  stop("Could not auto-detect metadata file in ", data_root,
+       ". Set cfg$metadata_file_override.")
+}
+
+candidates <- list_candidate_matrix_files(data_root)
+candidates <- setdiff(candidates, metadata_file)
+if (length(candidates) == 0) {
+  stop("Could not auto-detect matrix-like file in ", data_root,
+       ". Set cfg$matrix_file_override.")
+}
+
+matrix_file <- if (!is.na(cfg$matrix_file_override)) cfg$matrix_file_override else pick_default_matrix_file(candidates)
+sidecar <- find_sidecar_ids(matrix_file)
+
+cat("Metadata file:\n", metadata_file, "\n")
+cat("Matrix file:\n", matrix_file, "\n")
+print(sidecar)
+```
+
+## 4) Load Matrix and Align Metadata
+
+```{r load_matrix}
+read_meta_auto <- function(path) {
+  lower <- tolower(path)
+  if (grepl("\\.csv(\\.gz)?$", lower)) {
+    readr::read_csv(path, show_col_types = FALSE, progress = FALSE)
+  } else {
+    readr::read_tsv(path, show_col_types = FALSE, progress = FALSE)
+  }
+}
+
+meta <- read_meta_auto(metadata_file)
+meta_cols <- infer_metadata_columns(meta)
+cell_col <- meta_cols$cell_col
+label_col <- meta_cols$label_col
+
+cat("Detected metadata cell column:", cell_col, "\n")
+cat("Detected metadata label column:", label_col, "\n")
+
+chunked_allchr_mode <- FALSE
+selected_chromosomes <- NULL
+
+if (grepl("\\.scool$", tolower(matrix_file))) {
+  available_cells <- list_scool_cells(matrix_file)
+  # Flayamer/GSE80006 metadata IDs omit the resolution suffix present in .scool IDs (e.g. ".1M").
+  normalize_flayamer_key <- function(x) {
+    x <- as.character(x)
+    x <- gsub("\\.1m$", "", x, ignore.case = TRUE)
+    tolower(x)
+  }
+
+  meta0 <- meta %>%
+    dplyr::filter(!is.na(.data[[cell_col]]), !is.na(.data[[label_col]])) %>%
+    dplyr::mutate(.match_key = normalize_flayamer_key(.data[[cell_col]]))
+
+  scool_tbl <- tibble::tibble(
+    .scool_cell = available_cells,
+    .match_key = normalize_flayamer_key(available_cells)
+  )
+
+  direct_key_map <- meta0 %>%
+    dplyr::inner_join(scool_tbl, by = ".match_key") %>%
+    dplyr::mutate(.match_method = "flayamer_key")
+  cat("Flayamer key-match cells:", nrow(direct_key_map), "\n")
+
+  if (nrow(direct_key_map) >= 50) {
+    meta_all <- direct_key_map
+    meta_all[[cell_col]] <- meta_all$.scool_cell
+  } else {
+    meta_all <- match_metadata_to_scool_cells(
+      meta_df = meta,
+      cell_col = cell_col,
+      label_col = label_col,
+      scool_cells = available_cells,
+      min_cells = 50
+    )
+  }
+
+  if (length(cfg$target_chromosomes) == 1 && is.na(cfg$target_chromosomes)) {
+    selected_chromosomes <- list_scool_chromosomes(matrix_file)
+    selected_chromosomes <- setdiff(selected_chromosomes, c("chrM", "MT", "M"))
+    chunked_allchr_mode <- TRUE
+    Y_all <- NULL
+  } else {
+    selected_chromosomes <- cfg$target_chromosomes
+    Y_all <- load_scool_feature_by_cell(
+      scool_path = matrix_file,
+      cell_ids = meta_all[[cell_col]],
+      target_chromosomes = selected_chromosomes,
+      include_diag = cfg$bzip_include_diag,
+      verbose = TRUE
+    )
+    meta_all <- meta_all %>% arrange(match(.data[[cell_col]], colnames(Y_all)))
+  }
+} else {
+  mx <- read_contact_matrix(
+    matrix_path = matrix_file,
+    cell_ids_path = sidecar$cell_ids_path,
+    feature_ids_path = sidecar$feature_ids_path
+  )
+
+  feature_by_cell <- as_feature_by_cell(
+    mat = mx$mat,
+    cell_ids = mx$cell_ids,
+    metadata_cells = meta[[cell_col]]
+  )
+
+  aligned <- align_matrix_and_metadata(
+    feature_by_cell = feature_by_cell,
+    meta_df = meta,
+    cell_col = cell_col,
+    label_col = label_col
+  )
+
+  Y_all <- aligned$mat
+  meta_all <- aligned$meta
+  if (inherits(Y_all, "Matrix")) {
+    Y_all <- as(Y_all, "dgCMatrix")
+  } else {
+    Y_all <- as.matrix(Y_all)
+  }
+}
+
+meta_all <- meta_all %>%
+  group_by(.data[[label_col]]) %>%
+  filter(n() >= 20) %>%
+  ungroup()
+
+# Paper-style QC before imputation/embedding: remove very low-depth cells.
+if (!is.null(cfg$qc_min_depth) && is.finite(cfg$qc_min_depth) && cfg$qc_min_depth > 0) {
+  depth_col <- cfg$qc_depth_col
+  if (!is.null(depth_col) && depth_col %in% names(meta_all)) {
+    n_before <- nrow(meta_all)
+    meta_all <- meta_all %>% filter(.data[[depth_col]] >= cfg$qc_min_depth)
+    cat("QC depth filter (", depth_col, " >= ", cfg$qc_min_depth, "): kept ",
+        nrow(meta_all), " / ", n_before, " cells\n", sep = "")
+  } else {
+    stop("SCORE-style QC requires metadata depth column. Missing: ", depth_col)
+  }
+}
+
+if (!is.null(Y_all)) {
+  Y_all <- Y_all[, meta_all[[cell_col]], drop = FALSE]
+  if (!all(meta_all[[cell_col]] == colnames(Y_all))) stop("Cell ordering mismatch after alignment.")
+
+  cat("Aligned matrix dim (features x cells):", nrow(Y_all), "x", ncol(Y_all), "\n")
+  cat("Aligned metadata rows:", nrow(meta_all), "\n")
+} else {
+  cat("Using chunked all-chromosome mode. Metadata rows:", nrow(meta_all), "\n")
+}
+```
+
+## 5) Build Full Benchmark Matrix
+
+```{r full_matrix}
+if (isTRUE(chunked_allchr_mode)) {
+  build_scool_cells_by_chr <- function(cell_ids, chromosomes, verbose = TRUE) {
+    mats <- lapply(seq_along(chromosomes), function(i) {
+      chr <- chromosomes[[i]]
+      if (verbose) cat("Loading chromosome", chr, "(", i, "/", length(chromosomes), ")\n")
+      m <- load_scool_feature_by_cell(
+        scool_path = matrix_file,
+        cell_ids = cell_ids,
+        target_chromosomes = chr,
+        include_diag = cfg$bzip_include_diag,
+        verbose = FALSE
+      )
+      rownames(m) <- paste0(chr, "::", rownames(m))
+      m
+    })
+    do.call(rbind, mats)
+  }
+
+  cells_full <- meta_all[[cell_col]]
+  Y_full <- build_scool_cells_by_chr(cells_full, selected_chromosomes, verbose = TRUE)
+} else {
+  Y_full <- Y_all
+}
+
+labels_full <- meta_all[[label_col]]
+names(labels_full) <- meta_all[[cell_col]]
+
+# Additional chromosome-level QC, applied before imputation/embedding.
+if (isTRUE(cfg$qc_chr_min_contacts_by_chr_mb)) {
+  infer_resolution_mb_from_path <- function(path) {
+    b <- tolower(basename(path))
+    m1 <- regexec("([0-9]+)m\\.scool$", b)
+    g1 <- regmatches(b, m1)[[1]]
+    if (length(g1) == 2) return(as.numeric(g1[2]))
+    m2 <- regexec("([0-9]+)kb\\.scool$", b)
+    g2 <- regmatches(b, m2)[[1]]
+    if (length(g2) == 2) return(as.numeric(g2[2]) / 1000)
+    1
+  }
+
+  feat_names <- rownames(Y_full)
+  has_chr_prefix <- !is.null(feat_names) && any(grepl("::", feat_names, fixed = TRUE))
+  if (has_chr_prefix) {
+    res_mb <- infer_resolution_mb_from_path(matrix_file)
+    chr_vec <- sub("::.*$", "", feat_names)
+    chr_groups <- split(seq_len(nrow(Y_full)), chr_vec)
+    chr_use <- setdiff(names(chr_groups), as.character(cfg$qc_chr_exclude))
+
+    keep_cells <- rep(TRUE, ncol(Y_full))
+    names(keep_cells) <- colnames(Y_full)
+    fail_summary <- vector("list", length(chr_groups))
+    names(fail_summary) <- names(chr_groups)
+
+    for (chr in chr_use) {
+      idx <- chr_groups[[chr]]
+      n_bins <- infer_n_from_pairs(length(idx))
+      chr_len_mb <- n_bins * res_mb
+      min_contacts_chr <- max(1, as.integer(chr_len_mb))
+      chr_contacts <- Matrix::colSums(Y_full[idx, , drop = FALSE])
+      pass_chr <- chr_contacts >= min_contacts_chr
+      keep_cells <- keep_cells & pass_chr
+      pass_rate <- mean(pass_chr)
+      fail_summary[[chr]] <- c(
+        min_contacts = min_contacts_chr,
+        pass_rate = pass_rate,
+        n_fail = sum(!pass_chr)
+      )
+      cat("Chr-QC ", chr, ": min=", min_contacts_chr, ", pass_rate=", round(pass_rate, 3), "\n", sep = "")
+    }
+
+    fail_tbl <- dplyr::bind_rows(lapply(chr_use, function(chr) {
+      x <- fail_summary[[chr]]
+      tibble::tibble(chr = chr, min_contacts = x[["min_contacts"]], pass_rate = x[["pass_rate"]], n_fail = x[["n_fail"]])
+    })) %>%
+      dplyr::arrange(pass_rate, dplyr::desc(n_fail))
+    print(fail_tbl)
+
+    n_before <- ncol(Y_full)
+    kept_ids <- names(keep_cells)[keep_cells]
+    Y_full <- Y_full[, kept_ids, drop = FALSE]
+    meta_all <- meta_all %>% dplyr::filter(.data[[cell_col]] %in% kept_ids) %>%
+      dplyr::arrange(match(.data[[cell_col]], kept_ids))
+    labels_full <- meta_all[[label_col]]
+    names(labels_full) <- meta_all[[cell_col]]
+    cat("QC chromosome-level filter: kept ", ncol(Y_full), " / ", n_before, " cells\n", sep = "")
+    if (ncol(Y_full) == 0) {
+      stop("Chromosome-level QC removed all cells. Inspect fail table above and verify chromosome coverage rule on this dataset.")
+    }
+  } else {
+    warning("Skipping chromosome-level QC: features are not chr::pair labeled.")
+  }
+}
+
+cat("Full matrix dim:", nrow(Y_full), "x", ncol(Y_full), "\n")
+print(table(labels_full))
+```
+
+## 6) Coverage and HiCBZIP Imputation
+
+```{r imputation}
+cov_full <- compute_bulk_referenced_coverage(Y_full)
+
+validate_bzip_input <- function(Y, coverage, include_diag_expected = TRUE) {
+  if (!is.matrix(Y)) Y <- as.matrix(Y)
+  if (ncol(Y) != length(coverage)) {
+    stop("coverage length mismatch: ncol(Y)=", ncol(Y), " vs length(coverage)=", length(coverage))
+  }
+
+  feat_names <- rownames(Y)
+  has_chr_prefix <- !is.null(feat_names) && any(grepl("::", feat_names, fixed = TRUE))
+
+  check_one <- function(n_pairs, tag) {
+    n <- infer_n_from_long(n_pairs)
+    message("Validated ", tag, ": n_pairs=", n_pairs, " -> n_bins=", n)
+  }
+
+  if (has_chr_prefix) {
+    chr_vec <- sub("::.*$", "", feat_names)
+    idx_list <- split(seq_len(nrow(Y)), chr_vec)
+    for (chr in names(idx_list)) check_one(length(idx_list[[chr]]), paste0("chr ", chr))
+  } else {
+    check_one(nrow(Y), "single-matrix")
+  }
+
+  if (!isTRUE(include_diag_expected)) {
+    warning("include_diag=FALSE not supported for .scool loader path in this notebook")
+  }
+  invisible(TRUE)
+}
+
+run_one_method <- function(Y, coverage, method_name = "HiCBZIP-GB(NB)") {
+  message("Running ", method_name, " with ", ncol(Y), " cells and ", nrow(Y), " features")
+
+  feat_names <- rownames(Y)
+  has_chr_prefix <- !is.null(feat_names) && any(grepl("::", feat_names, fixed = TRUE))
+
+  if (!has_chr_prefix) {
+    return(run_BZIP_GB_NB(
+      sim_y = as.matrix(Y),
+      coverage = coverage,
+      r = cfg$bzip_r,
+      threshold = cfg$bzip_threshold,
+      B = cfg$bzip_B,
+      include_diag = cfg$bzip_include_diag
+    ))
+  }
+
+  chr_vec <- sub("::.*$", "", feat_names)
+  idx_list <- split(seq_len(nrow(Y)), chr_vec)
+
+  out <- matrix(0, nrow = nrow(Y), ncol = ncol(Y))
+  rownames(out) <- rownames(Y)
+  colnames(out) <- colnames(Y)
+
+  for (chr in names(idx_list)) {
+    idx <- idx_list[[chr]]
+    Yc <- Y[idx, , drop = FALSE]
+
+    ok <- TRUE
+    tryCatch({
+      infer_n_from_long(nrow(Yc))
+    }, error = function(e) {
+      ok <<- FALSE
+      warning("Skipping chromosome ", chr, " because N_pairs is not triangular: ", nrow(Yc))
+    })
+    if (!ok) next
+
+    out[idx, ] <- run_BZIP_GB_NB(
+      sim_y = as.matrix(Yc),
+      coverage = coverage,
+      r = cfg$bzip_r,
+      threshold = cfg$bzip_threshold,
+      B = cfg$bzip_B,
+      include_diag = cfg$bzip_include_diag
+    )
+  }
+
+  out
+}
+
+imputed_full <- NULL
+if (isTRUE(cfg$run_full)) {
+  cache_tag <- paste0("imputed_flayamer_", ncol(Y_full), "cells_", nrow(Y_full), "features.rds")
+  cache_path <- file.path(out_dir, cache_tag)
+
+  if (isTRUE(cfg$use_imputation_cache) && file.exists(cache_path)) {
+    cat("Loading cached imputation:", cache_path, "\n")
+    imputed_full <- readRDS(cache_path)
+  } else {
+    validate_bzip_input(Y_full, cov_full$coverage, include_diag_expected = cfg$bzip_include_diag)
+    imputed_full <- run_one_method(Y_full, cov_full$coverage)
+    if (isTRUE(cfg$use_imputation_cache)) {
+      saveRDS(imputed_full, cache_path)
+      cat("Saved imputation cache:", cache_path, "\n")
+    }
+  }
+  cat("Imputed dim:", dim(imputed_full)[1], "x", dim(imputed_full)[2], "\n")
+}
+```
+
+## 6b) Example Contact Heatmap (Raw vs Imputed)
+
+```{r example_heatmap, fig.height=6}
+vec_upper_rowmajor_to_mat_simple <- function(v) {
+  n <- infer_n_from_long(length(v))
+  M <- matrix(0, n, n)
+  idx <- 1L
+  for (i in seq_len(n)) {
+    len <- n - i + 1L
+    M[i, i:n] <- v[idx:(idx + len - 1L)]
+    idx <- idx + len
+  }
+  M[lower.tri(M)] <- t(M)[lower.tri(M)]
+  M
+}
+
+to_long <- function(M, method_name) {
+  df <- as.data.frame(as.table(M))
+  colnames(df) <- c("i", "j", "value")
+  df$i <- as.integer(df$i)
+  df$j <- as.integer(df$j)
+  df$value <- as.numeric(df$value)
+  df <- df[is.finite(df$i) & is.finite(df$j) & is.finite(df$value), , drop = FALSE]
+  df$method <- method_name
+  df
+}
+
+if (!isTRUE(cfg$run_heatmap)) {
+  cat("Heatmap skipped: cfg$run_heatmap=FALSE\n")
+} else if (is.null(rownames(Y_full)) || !any(grepl("::", rownames(Y_full), fixed = TRUE))) {
+  cat("Heatmap skipped: chromosome-tagged rownames (chr::pair) not found.\n")
+} else {
+  chr_vec <- sub("::.*$", "", rownames(Y_full))
+
+  # Pick a representative higher-coverage cell to avoid empty visuals.
+  cell_idx <- order(cov_full$coverage, decreasing = TRUE)[max(1, floor(0.1 * length(cov_full$coverage)))]
+  cell_name <- colnames(Y_full)[cell_idx]
+
+  # Choose chromosome with most nonzero counts in this cell.
+  chr_nonzero <- tapply(Y_full[, cell_idx] > 0, chr_vec, sum)
+  chr_show <- names(which.max(chr_nonzero))
+  idx_chr <- which(chr_vec == chr_show)
+
+  raw_vec <- as.numeric(Y_full[idx_chr, cell_idx])
+  imp_vec <- as.numeric(imputed_full[idx_chr, cell_idx])
+
+  raw_mat <- vec_upper_rowmajor_to_mat_simple(raw_vec)
+  imp_mat <- vec_upper_rowmajor_to_mat_simple(imp_vec)
+  diff_mat <- imp_mat - raw_mat
+
+  nz <- which((raw_mat + imp_mat) > 0, arr.ind = TRUE)
+  if (nrow(nz) > 0) {
+    pad <- 8
+    i_min <- max(1, min(nz[, 1], nz[, 2]) - pad)
+    i_max <- min(nrow(raw_mat), max(nz[, 1], nz[, 2]) + pad)
+    raw_mat <- raw_mat[i_min:i_max, i_min:i_max, drop = FALSE]
+    imp_mat <- imp_mat[i_min:i_max, i_min:i_max, drop = FALSE]
+    diff_mat <- diff_mat[i_min:i_max, i_min:i_max, drop = FALSE]
+  }
+
+  raw_log <- log1p(raw_mat)
+  imp_log <- log1p(imp_mat)
+  pos_vals <- c(raw_log[raw_log > 0], imp_log[imp_log > 0])
+  count_max <- if (length(pos_vals) > 0) as.numeric(stats::quantile(pos_vals, 0.995, na.rm = TRUE)) else max(c(raw_log, imp_log), na.rm = TRUE)
+  count_max <- max(count_max, 1e-6)
+
+  heat_df <- bind_rows(
+    to_long(raw_log, "Raw"),
+    to_long(imp_log, "HiCBZIP-GB(NB)")
+  )
+
+  p_hm <- ggplot(heat_df, aes(x = j, y = i, fill = value)) +
+    geom_tile() +
+    facet_wrap(~method, ncol = 2) +
+    scale_fill_viridis_c(limits = c(0, count_max), option = "plasma") +
+    coord_equal() +
+    scale_y_reverse() +
+    theme_minimal() +
+    labs(
+      title = paste0("Flayamer Example Contact Heatmap on ", chr_show, " (zoomed)"),
+      subtitle = paste0("Cell: ", cell_name, " | scale=log1p(count), cap=99.5%"),
+      x = "bin", y = "bin", fill = "log1p"
+    )
+
+  print(p_hm)
+
+  diff_df <- to_long(diff_mat, "Imputed - Raw")
+  lim <- max(abs(diff_df$value), na.rm = TRUE)
+  lim <- ifelse(is.finite(lim) && lim > 0, lim, 1)
+
+  p_diff <- ggplot(diff_df, aes(x = j, y = i, fill = value)) +
+    geom_tile() +
+    scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick", midpoint = 0, limits = c(-lim, lim)) +
+    coord_equal() +
+    scale_y_reverse() +
+    theme_minimal() +
+    labs(
+      title = paste0("Flayamer Difference Map on ", chr_show),
+      subtitle = "Imputed - Raw",
+      x = "bin", y = "bin", fill = "delta"
+    )
+
+  print(p_diff)
+
+  ggsave(file.path(out_dir, paste0("example_heatmap_zoom_", chr_show, "_", cell_name, ".png")), p_hm, width = 15, height = 6, dpi = 150)
+  ggsave(file.path(out_dir, paste0("example_heatmap_diff_", chr_show, "_", cell_name, ".png")), p_diff, width = 8, height = 6, dpi = 150)
+}
+```
+
+## 7) Embedding Benchmark (Plot-Only Outputs)
+
+```{r embedding_eval}
+if (!isTRUE(cfg$run_full)) {
+  stop("Set cfg$run_full = TRUE to compute benchmark outputs.")
+}
+
+apply_top_quantile_per_cell <- function(Y, q = 0.80) {
+  X <- as.matrix(Y)
+  rn <- rownames(X)
+  cn <- colnames(X)
+  for (k in seq_len(ncol(X))) {
+    v <- X[, k]
+    pos <- v[v > 0]
+    if (length(pos) < 5) next
+    thr <- as.numeric(stats::quantile(pos, probs = q, na.rm = TRUE))
+    v[v < thr] <- 0
+    X[, k] <- v
+  }
+  rownames(X) <- rn
+  colnames(X) <- cn
+  X
+}
+
+# Apply common coverage filter for fair comparison.
+q_cov <- stats::quantile(cov_full$coverage, probs = cfg$embedding_eval_cov_q, na.rm = TRUE)
+keep_eval <- cov_full$coverage >= q_cov[1] & cov_full$coverage <= q_cov[2]
+cat("Embedding eval coverage filter:", round(q_cov[1], 4), "to", round(q_cov[2], 4),
+    "| kept", sum(keep_eval), "of", length(keep_eval), "cells\n")
+
+labels_eval <- labels_full[keep_eval]
+coverage_eval <- as.numeric(cov_full$coverage[keep_eval])
+
+method_inputs <- list(
+  "Raw" = Y_full[, keep_eval, drop = FALSE],
+  "HiCBZIP-GB(NB)" = imputed_full[, keep_eval, drop = FALSE]
+)
+
+infer_resolution_mb_from_path <- function(path) {
+  b <- tolower(basename(path))
+  m1 <- regexec("([0-9]+)m\\.scool$", b)
+  g1 <- regmatches(b, m1)[[1]]
+  if (length(g1) == 2) return(as.numeric(g1[2]))
+  m2 <- regexec("([0-9]+)kb\\.scool$", b)
+  g2 <- regmatches(b, m2)[[1]]
+  if (length(g2) == 2) return(as.numeric(g2[2]) / 1000)
+  1
+}
+
+strata_from_max_range_mb <- function(max_range_mb, resolution_mb) {
+  if (!is.finite(max_range_mb)) return(as.integer(1e6))
+  n <- floor(max_range_mb / resolution_mb) + 1
+  as.integer(max(1, n))
+}
+
+resolution_mb <- infer_resolution_mb_from_path(matrix_file)
+cat("Inferred matrix resolution (Mb):", resolution_mb, "\n")
+
+subset_chr_pairs_by_max_range <- function(Y, max_range_mb, resolution_mb) {
+  if (!is.finite(max_range_mb)) return(Y)
+  if (is.null(rownames(Y)) || !any(grepl("::", rownames(Y), fixed = TRUE))) return(Y)
+
+  max_offset <- floor(max_range_mb / resolution_mb)
+  max_offset <- as.integer(max(0, max_offset))
+
+  feat_names <- rownames(Y)
+  chr_vec <- sub("::.*$", "", feat_names)
+  chr_groups <- split(seq_len(nrow(Y)), chr_vec)
+
+  keep_idx <- integer(0)
+  for (chr in names(chr_groups)) {
+    idx <- chr_groups[[chr]]
+    n_pairs <- length(idx)
+    n_bins <- infer_n_from_pairs(n_pairs)
+    dmax <- min(max_offset, n_bins - 1L)
+    if (dmax < 0) next
+
+    local_keep <- integer(0)
+    for (d in 0:dmax) {
+      m <- n_bins - d
+      cols <- integer(m)
+      for (k in seq_len(m)) {
+        i1 <- k
+        j1 <- k + d
+        cols[k] <- as.integer((i1 - 1L) * (2L * n_bins - i1 + 2L) / 2L + (j1 - i1 + 1L))
+      }
+      local_keep <- c(local_keep, cols)
+    }
+    local_keep <- sort(unique(local_keep))
+    keep_idx <- c(keep_idx, idx[local_keep])
+  }
+
+  keep_idx <- sort(unique(keep_idx))
+  Y[keep_idx, , drop = FALSE]
+}
+run_pipeline <- function(Yin, labels, method_name, pipe) {
+  if (grepl("^paper_innerproduct_mds_", pipe)) {
+    max_range_mb <- if (grepl("_2M$", pipe)) {
+      2
+    } else if (grepl("_5M$", pipe)) {
+      5
+    } else if (grepl("_10M$", pipe)) {
+      10
+    } else if (grepl("_20M$", pipe)) {
+      20
+    } else if (grepl("_30M$", pipe)) {
+      30
+    } else if (grepl("_50M$", pipe)) {
+      50
+    } else {
+      NA_real_
+    }
+
+    cfg_i <- cfg
+    if (is.finite(max_range_mb)) {
+      cfg_i$innerproduct_n_strata <- strata_from_max_range_mb(max_range_mb, resolution_mb)
+    } else {
+      # fixed baseline
+      cfg_i$innerproduct_n_strata <- as.integer(cfg$innerproduct_n_strata)
+    }
+
+    out <- embed_and_score(
+      Y_feature_by_cell = Yin,
+      labels = labels,
+      method_name = method_name,
+      pipeline = "paper_innerproduct_mds",
+      cfg = cfg_i,
+      coverage_vec = coverage_eval
+    )
+    out$pipeline <- pipe
+    return(out)
+  }
+
+  embed_and_score(
+    Y_feature_by_cell = Yin,
+    labels = labels,
+    method_name = method_name,
+    pipeline = pipe,
+    cfg = cfg,
+    coverage_vec = coverage_eval
+  )
+}
+
+emb_all <- dplyr::bind_rows(lapply(cfg$embedding_pipelines, function(pipe) {
+  dplyr::bind_rows(lapply(names(method_inputs), function(mn) {
+    set.seed(cfg$seed)
+    run_pipeline(method_inputs[[mn]], labels_eval, mn, pipe)
+  }))
+}))
+
+score_tbl <- emb_all %>%
+  dplyr::distinct(pipeline, method, ari) %>%
+  dplyr::mutate(
+    ari_mean = round(ari, 4),
+    ari_sd = 0
+  ) %>%
+  dplyr::select(pipeline, method, ari_mean, ari_sd) %>%
+  dplyr::arrange(pipeline, method)
+
+print(score_tbl)
+
+inner_score <- score_tbl %>%
+  dplyr::filter(grepl("^paper_innerproduct_mds_", pipeline)) %>%
+  dplyr::mutate(
+    range = dplyr::case_when(
+      grepl("_fixed$", pipeline) ~ "default_nstrata_10",
+      grepl("_2M$", pipeline) ~ "2M",
+      grepl("_5M$", pipeline) ~ "5M",
+      grepl("_10M$", pipeline) ~ "10M",
+      grepl("_20M$", pipeline) ~ "20M",
+      grepl("_30M$", pipeline) ~ "30M",
+      grepl("_50M$", pipeline) ~ "50M",
+      TRUE ~ pipeline
+    ),
+    range = factor(range, levels = c("default_nstrata_10", "2M", "5M", "10M", "20M", "30M", "50M"))
+  ) %>%
+  dplyr::arrange(range, method)
+
+p_range <- ggplot(inner_score, aes(x = range, y = ari_mean, color = method, group = method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(
+    title = "Flayamer InnerProduct ARI vs Max Interaction Range",
+    subtitle = "1Mb input matrix; Raw vs HiCBZIP-GB(NB)",
+    x = "Max range setting",
+    y = "ARI",
+    color = "Method"
+  )
+
+print(p_range)
+ggsave(file.path(out_dir, "innerproduct_ari_vs_maxrange.png"), p_range, width = 10, height = 5, dpi = 150)
+```
+
+## 8) Save Embedding Plots (Annotated with ARI)
+
+```{r save_plots, fig.width=12, fig.height=6}
+plot_df <- emb_all %>%
+  left_join(score_tbl, by = c("pipeline", "method")) %>%
+  mutate(panel = paste0(method, "\nARI=", ari_mean))
+
+for (pipe in unique(plot_df$pipeline)) {
+
+  p_one <- ggplot(plot_df %>% filter(pipeline == pipe), aes(X1, X2, color = label)) +
+    geom_point(size = 1, alpha = 0.9) +
+    facet_wrap(~panel, ncol = 2, scales = "free") +
+    theme_minimal() +
+    labs(
+      title = paste0("Flayamer Benchmark: ", pipe),
+      subtitle = paste0("n_cells=", sum(keep_eval), " | Raw vs HiCBZIP-GB(NB)"),
+      color = label_col
+    )
+
+  print(p_one)
+  plot_path <- file.path(out_dir, paste0("embedding_", pipe, "_raw_vs_imputed.png"))
+  ggsave(plot_path, p_one, width = 12, height = 6, dpi = 150)
+  cat("Saved:", plot_path, "\n")
+}
+```
+
+
+
+
+
+## 9) Analysis Summary
+
+- Data and setup
+  - Dataset: Flayamer oocyte/zygote, 1M resolution.
+  - Compare Raw vs HiCBZIP-GB(NB) using the same aligned cells and labels.
+
+- QC (SCORE/scHiCluster-style)
+  - Depth filter from metadata: depth >= 5000.
+  - Chromosome-level filter: for each autosome of length x Mb, require at least x cis-contacts in that chromosome.
+  - A cell is removed if any autosome fails this threshold.
+
+- Imputation branch
+  - Raw: use QC-passed matrix directly.
+  - HiCBZIP-GB(NB): apply HiCBZIP imputation on the same QC-passed matrix.
+
+- Embedding methods benchmarked
+  - paper_innerproduct_mds with:
+    - default_nstrata_10
+    - max-range variants: 2M, 5M, 10M, 20M, 30M, 50M
+
+- Paper_innerproduct_mds:
+    - Per chromosome, take first n_strata (default=10); z-score each stratum per cell; concatenate strata.
+    - Similarity: R = Z Z^T / p, scale to [-1, 1].
+    - Distance: D = sqrt(2 - 2R).
+    - Aggregate chromosome distances by median.
+    - Classical MDS to 2D, then k-means.
+
+- Evaluation
+  - ARI comparison of Raw vs HiCBZIP-GB(NB) across varying max interaction ranges.
+

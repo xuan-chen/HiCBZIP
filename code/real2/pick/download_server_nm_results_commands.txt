@@ -1,0 +1,8 @@
+﻿# Download full N(M) server run folders to local (Windows Command Prompt)
+
+scp -r -J xxc730@bragg.cs.miami.edu xchen@gene.cs.miami.edu:/home/xchen/schic/software/SCORE/results/oocyte_zygote_raw_nm_pairs_r* D:/Codex/Test/downloaded_results/server_json_runs_nm/
+scp -r -J xxc730@bragg.cs.miami.edu xchen@gene.cs.miami.edu:/home/xchen/schic/software/SCORE/results/oocyte_zygote_bhzip_nm_pairs_r* D:/Codex/Test/downloaded_results/server_json_runs_nm/
+
+# Optional: keep logs and summary folders too
+scp -r -J xxc730@bragg.cs.miami.edu xchen@gene.cs.miami.edu:/home/xchen/schic/software/SCORE/results/oocyte_zygote_raw_vs_bhzip_nm_10runs_innerproduct D:/Codex/Test/downloaded_results/
+scp -r -J xxc730@bragg.cs.miami.edu xchen@gene.cs.miami.edu:/home/xchen/schic/software/SCORE/results/oocyte_zygote_raw_vs_bhzip_nm_10runs_snapatac D:/Codex/Test/downloaded_results/

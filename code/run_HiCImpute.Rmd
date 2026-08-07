@@ -1,0 +1,144 @@
+---
+title: "Untitled"
+author: "Xuan Chen"
+date: "2025-10-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+library(tidyverse)
+source("Functions/Functions.R")
+library(HiCImpute)
+```
+
+```{r}
+# ---- Config ----
+data_dir <- "C:/Users/67402/OneDrive - University of Miami/courses/research/HiC/Data/Methylation_Hi-C_data/sim_HBA3_random_chr"
+out_dir  <- "Output/output_251026_sim_HBA_ten_chr_combine/HiCImpute_biglists"
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+lambda_list <- c(0.01,0.03,0.05,0.1,0.2,0.3,0.4,0.5,0.7,1)
+
+# HiCImpute args (use your working values)
+hicimpute_args <- list(
+  n = 100,
+  mc.cores = 1,
+  cutoff = 0.5,
+  niter = 1000,
+  burnin = 500
+)
+
+base_seed <- 123456  # reproducibility
+
+```
+
+
+```{r}
+# ---- Helpers ----
+list_sim_files <- function(dir) {
+  patt <- "^Simulation_snm3Cseq_human_brian_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
+  list.files(dir, pattern = patt, full.names = TRUE)
+}
+
+extract_chr <- function(fname) {
+  # from "..._chr4_140M_145M_..."
+  m <- regexec("chr([0-9XY]+)", fname)
+  g <- regmatches(fname, m)
+  if (length(g) && length(g[[1]]) >= 2) paste0("chr", g[[1]][2]) else NA_character_
+}
+
+infer_n_from_long <- function(N_pairs) {
+  n <- (1 + sqrt(1 + 8*N_pairs)) / 2
+  as.integer(round(n))
+}
+
+build_scHiC_for_hicimpute <- function(sim_y) {
+  # sim_y: N x K, long form (upper triangle without diagonal) per column
+  apply(sim_y, 2, function(y) {
+    m2d <- matrix_long_to_matrix2D_offdiag(y)
+    m2d[upper.tri(m2d, diag = FALSE)]
+  })
+}
+
+reconstruct_muS <- function(o.hicimpute) {
+  # o.hicimpute$Impute_SZ should be N x K upper-tri (no diag)
+  apply(o.hicimpute$Impute_SZ, 2, function(x) {
+    m2d <- matrix_long_to_matrix2D_offdiag(x, triangle = "upper")
+    matrix2D_to_matrix_long(m2d, include.diag = FALSE)
+  })
+}
+load_env <- function(f) { e <- new.env(parent = emptyenv()); ok <- try(load(f, envir = e), TRUE); if (inherits(ok, "try-error")) NULL else e }
+```
+
+
+```{r}
+# ---- Discover inputs ----
+sim_files <- list_sim_files(data_dir)
+if (!length(sim_files)) stop("No input files found in: ", data_dir)
+sim_files
+```
+
+
+```{r}
+if (!length(sim_files)) stop("No input files found.")
+total_tasks <- length(sim_files) * length(lambda_list)
+pb <- txtProgressBar(min = 0, max = total_tasks, style = 3)
+tasks_done <- 0
+results_by_chr <- list()
+
+for (f in sim_files) {
+  chr <- extract_chr(basename(f))
+  message("\n=== ", basename(f), " (", chr, ") ===")
+
+  e <- load_env(f)
+  if (is.null(e) || !exists("true_muS", envir = e)) { warning("Missing true_muS in ", f); next }
+  true_muS <- e$true_muS
+  N <- nrow(true_muS); K <- ncol(true_muS); n_bins <- infer_n_from_long(N)
+
+  if (!is.list(results_by_chr[[chr]])) {
+    results_by_chr[[chr]] <- list(
+      meta = list(chr = chr, n_pairs = N, K_cells = K, n_bins = n_bins, lambda_list = lambda_list),
+      coverages = list()
+    )
+  }
+
+  for (coverage in lambda_list) {
+    cov_key <- as.character(coverage)
+    set.seed(base_seed)
+
+    sim_y <- matrix(rpois(N*K, lambda = coverage * as.numeric(true_muS)), nrow=N, ncol=K)
+    scHiC <- build_scHiC_for_hicimpute(sim_y)
+    bulk_vec <- rowSums(scHiC)
+
+    t_start <- Sys.time()
+    o.hicimpute <- do.call(MCMCImpute, c(list(scHiC=scHiC, bulk=bulk_vec, expected=NULL), hicimpute_args))
+    muS_est <- reconstruct_muS(o.hicimpute)
+    elapsed <- as.numeric(difftime(Sys.time(), t_start, units="secs"))
+
+    cat(sprintf("  coverage = %-4s | %.1f sec\n", cov_key, elapsed))
+    flush.console()
+
+    results_by_chr[[chr]]$coverages[[cov_key]] <- list(
+      chr = chr,
+      coverage = coverage,
+      sim_y = sim_y,
+      muS = muS_est
+    )
+
+    tasks_done <- tasks_done + 1
+    setTxtProgressBar(pb, tasks_done)
+  }
+
+  # checkpoint save per chr
+  saveRDS(results_by_chr[[chr]], file.path(out_dir, sprintf("results_%s.rds", chr)))
+  message("  Saved: ", file.path(out_dir, sprintf("results_%s.rds", chr)))
+}
+
+close(pb)
+saveRDS(results_by_chr, file.path(out_dir, "results_by_chr.rds"))
+cat("\nAll chromosomes finished.\n")
+```
+
+
+
