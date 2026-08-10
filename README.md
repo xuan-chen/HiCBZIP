@@ -1,30 +1,41 @@
-# HiCBZIP clean code draft
+# HiCBZIP
 
-This folder is a public-release draft for the HiCBZIP manuscript repository. It is organized around the manuscript workflow:
+HiCBZIP is a Bayesian zero-inflated imputation framework for sparse single-cell Hi-C contact maps. This repository contains the method implementation and manuscript reproducibility code for:
 
-1. Core HiCBZIP method code.
-2. Simulation study.
-3. Real-data study 1: downsampled NPC chrX.
-4. Real-data study 2: SCORE mouse oocyte-to-zygote benchmark.
+1. The biologically realistic simulation study.
+2. The downsampled NPC chrX recovery benchmark.
+3. The SCORE mouse oocyte-to-zygote downstream embedding benchmark.
 
-The original working code in `../code/` is intentionally left untouched.
+The repository is organized to help readers reproduce the main analyses from processed inputs, while keeping the focus on HiCBZIP code and final manuscript workflows. Large intermediate files and generated figures are not intended to be committed directly to GitHub.
 
-## Main entry points
+## Repository Layout
 
-- `WORKFLOW.md`: ordered description of all manuscript steps.
-- `HiCBZIP/`: core HiCBZIP implementation and shared analysis helpers.
-- `simulations/01_run_HiCBZIP_GB_NB_simulation.R`: simulation HiCBZIP-GB/GB(NB) runner.
-- `simulations/02_prepare_simulation_manuscript_summaries.R`: simulation manuscript summary workflow.
-- `real_data_study_1/01_make_NPC_chrX_processed_input.R`: NPC chrX processed input builder.
-- `real_data_study_1/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`: NPC chrX HiCBZIP-GB/GB(NB) runner.
-- `real_data_study_1/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`: NPC chrX HiCBZIP-N(M) runner.
-- `real_data_study_1/04_summarize_NPC_chrX_manuscript_metrics.R`: NPC chrX manuscript summary workflow.
-- `real_data_study_2/01_build_SCORE_HiCBZIP_inputs.R`: SCORE Raw/HiCBZIP `.scool` builder.
-- `real_data_study_2/02_run_SCORE_embeddings.R`: SCORE embedding runs.
-- `real_data_study_2/03_summarize_SCORE_manuscript_metrics.R`: SCORE manuscript metric summary.
+- `HiCBZIP/`: core HiCBZIP model code, including the empirical-Bayes implementation and matched-normal Stan model.
+- `simulations/`: scripts for the manuscript simulation study.
+- `real_data_study_1/`: scripts for the downsampled NPC chrX benchmark.
+- `real_data_study_2/`: scripts for the SCORE oocyte-to-zygote benchmark.
+- `benchmarks/`: version and command notes for external comparison methods.
+- `data/`: small example data and documentation for required processed inputs.
+- `environment/`: software and package version information.
+- `results/`: regenerated outputs; most files here should stay out of Git.
+- `WORKFLOW.md`: ordered, study-by-study reproducibility map.
 
-## Data policy
+## Reproducibility Scope
 
-Generated figure files are not intended to be committed. Small processed examples can live in `data/`; large processed inputs and result folders should be archived externally and linked from the manuscript and release notes.
+This release is designed to reproduce manuscript-level results from processed inputs. It does not preserve every exploratory notebook or local benchmark runner used during method development. External methods such as scHiCluster, HiCImpute, Higashi, Fast-Higashi, and SCORE are documented by version/command notes and consumed as processed benchmark outputs where appropriate.
 
-See `data/README.md` and `../missing_inputs.md` before copying this folder into the public GitHub repository.
+## Main Entry Points
+
+- `simulations/01_run_HiCBZIP_GB_NB_simulation.R`
+- `simulations/02_prepare_simulation_manuscript_summaries.R`
+- `real_data_study_1/01_make_NPC_chrX_processed_input.R`
+- `real_data_study_1/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`
+- `real_data_study_1/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`
+- `real_data_study_1/04_summarize_NPC_chrX_manuscript_metrics.R`
+- `real_data_study_2/01_build_SCORE_HiCBZIP_inputs.R`
+- `real_data_study_2/02_run_SCORE_embeddings.R`
+- `real_data_study_2/03_summarize_SCORE_manuscript_metrics.R`
+
+## Required Inputs
+
+See `data/README.md` for the expected processed input layout.
