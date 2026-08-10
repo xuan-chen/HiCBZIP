@@ -1,0 +1,879 @@
+---
+title: "Untitled"
+author: "Xuan Chen"
+date: "2025-10-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = T)
+rm(list=ls())
+library(tidyverse)
+library(rstan)
+library(magrittr)
+source(file.path("..", "_common", "project_paths.R"))
+knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
+```
+
+
+```{r}
+source_hicbzip_core()
+```
+
+```{r}
+lambda_list = c(0.01,0.03,0.05,0.1,0.2,0.3,0.4,0.5,0.7,1)
+set.seed(123456)
+n_rep = 10
+resolution = 50*1e3
+```
+
+
+```{r}
+load(path_here("data", "processed", "simulation", "muS_combined_plot_260209.RData"))
+```
+
+
+```{r}
+# Quick sanity checks
+all_models_unified %>% count(model)
+all_models_unified %>% group_by(model) %>% summarise(N = first(N), K = first(K))
+str(all_models_unified$muS[[1]])  # matrix N x K
+str(all_models_unified)
+all_models_unified %>% group_by(model, chr, coverage) %>% summarise(n=n())
+```
+
+```{r}
+unique_chr = chr_vec
+cell_type_label = true_by_chr$`1` %>% colnames() %>% substr(., 1, 10)
+```
+
+# Truth
+
+```{r, fig.width=12}
+set.seed(123456)
+library(umap)
+library(mclust)
+umap_plots <- lapply(1:length(list_muS), function(i) {
+  umap_results <- umap(t(list_muS[[i]]), n_neighbors = n_rep, random_state=12345)
+  embedding <- umap_results$layout
+  kmeans_results <- kmeans(embedding, centers = 3, nstart = n_rep)
+  embedding_df <- data.frame(embedding, Cluster = factor(kmeans_results$cluster), Type = cell_type_label)
+  ari_value <- adjustedRandIndex(kmeans_results$cluster, rep(1:3, each = n_rep))
+  plot_title <- names(list_muS)[i]
+  plot_subtitle = paste("ARI:",round(ari_value, 3))
+  ggplot(embedding_df, aes(x = X1, y = X2, color = Type, shape = Cluster)) +
+  geom_point(size = 3) + labs(title = plot_title, subtitle = plot_subtitle) + theme_minimal() + 
+    theme(legend.position = "none")
+})
+library(gridExtra)
+do.call("grid.arrange", c(umap_plots, ncol=5))
+
+```
+
+# Simulated Data by Chr
+
+```{r, fig.width=12}
+plot_tsne_simY_by_chr_tbl <- function(list_y_sim,
+                                      npc       = 20,
+                                      pplx      = 7,
+                                      n_rep     = 10,
+                                      tsne_seed = 12345) {
+  # unique chromosomes (numeric)
+  chr_ids <- sort(unique(list_y_sim$chr))
+
+  # coverage levels in desired order (from the ordered factor)
+  cov_levels <- levels(list_y_sim$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(list_y_sim$coverage))
+  }
+
+  for (chr_id in chr_ids) {
+    chr_dat <- list_y_sim %>% 
+      filter(chr == chr_id)
+
+    if (nrow(chr_dat) == 0) {
+      warning("No rows for chr = ", chr_id)
+      next
+    }
+
+    set.seed(tsne_seed)
+
+    tsne_plots <- lapply(cov_levels, function(cv) {
+      # subset row for this chr and coverage
+      row_cv <- chr_dat %>% filter(coverage == cv)
+
+      lambda_lab <- as.character(cv)
+
+      # if missing this coverage, show placeholder
+      if (nrow(row_cv) == 0) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10,
+                          ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text",
+                     x = 0, y = 0,
+                     label = paste0("no data for λ = ", lambda_lab),
+                     size = 4) +
+            xlab("X1") + ylab("X2") +
+            labs(
+              title    = paste0("λ = ", lambda_lab),
+              subtitle = "ARI: NA"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # there should be exactly one row per chr × coverage
+      mat <- row_cv$muS[[1]]   # N × K
+      mat <- as.matrix(mat)
+
+      panel_title <- paste0("λ = ", lambda_lab)
+
+      # all-zero (or constant) → t-SNE / ARI not meaningful
+      if (all(mat == 0) || sd(as.vector(mat)) == 0) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10,
+                          ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text",
+                     x = 0, y = 0,
+                     label = "(all counts identical;\n t-SNE / ARI not computed)",
+                     size = 4) +
+            xlab("X1") + ylab("X2") +
+            labs(
+              title    = panel_title,
+              subtitle = "ARI: NA"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # t-SNE on cells (columns)
+      tsne_res <- Rtsne(t(mat),
+                        initial_dims = npc,
+                        perplexity   = pplx,
+                        theta        = 0,
+                        pca_center   = FALSE)
+
+      # k-means in 2D t-SNE space
+      km_res <- kmeans(tsne_res$Y,
+                       centers = 3,
+                       nstart  = n_rep)
+
+      ari_val <- adjustedRandIndex(
+        rep(1:3, each = n_rep),
+        km_res$cluster
+      )
+
+      emb_df <- data.frame(
+        X1      = tsne_res$Y[, 1],
+        X2      = tsne_res$Y[, 2],
+        Cluster = factor(km_res$cluster),
+        Type    = cell_type_label  # length 30
+      )
+
+      ggplot(emb_df, aes(x = X1, y = X2,
+                         color = Type, shape = Cluster)) +
+        geom_point(size = 3) +
+        labs(
+          title    = panel_title,
+          subtitle = paste("ARI:", round(ari_val, 3))
+        ) +
+        theme_minimal() +
+        theme(legend.position = "none")
+    })
+
+    # 5 x 2 grid (10 coverages) for this chromosome
+    do.call(
+      grid.arrange,
+      c(tsne_plots,
+        ncol = 5,
+        top  = paste0("Chromosome ", chr_id,
+                      " — clustering of downsampled counts Y across λ"))
+    )
+  }
+}
+
+## Example call:
+## (assuming list_y_sim is your tibble and cell_type_label is defined)
+plot_tsne_simY_by_chr_tbl(list_y_sim,
+                          npc = 20,
+                          pplx = 7,
+                          n_rep = 10,
+                          tsne_seed = 12345)
+
+```
+
+
+```{r, fig.width=12}
+plot_umap_simY_by_chr_tbl <- function(list_y_sim,
+                                      n_neighbors = 10,
+                                      n_rep       = 10,
+                                      umap_seed   = 12345) {
+  # unique chromosomes (numeric)
+  chr_ids <- sort(unique(list_y_sim$chr))
+
+  # coverage levels in desired order (from the ordered factor if present)
+  cov_levels <- levels(list_y_sim$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(list_y_sim$coverage))
+  }
+
+  for (chr_id in chr_ids) {
+    chr_dat <- list_y_sim %>%
+      filter(chr == chr_id)
+
+    if (nrow(chr_dat) == 0) {
+      warning("No rows for chr = ", chr_id)
+      next
+    }
+
+    set.seed(umap_seed)
+
+    umap_plots <- lapply(cov_levels, function(cv) {
+      # subset row for this chr and coverage
+      row_cv <- chr_dat %>% filter(coverage == cv)
+
+      lambda_lab <- as.character(cv)
+
+      # if missing this coverage, show placeholder
+      if (nrow(row_cv) == 0) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10,
+                          ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text",
+                     x = 0, y = 0,
+                     label = paste0("no data for λ = ", lambda_lab),
+                     size = 4) +
+            xlab("X1") + ylab("X2") +
+            labs(
+              title    = paste0("λ = ", lambda_lab),
+              subtitle = "ARI: NA"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # there should be exactly one row per chr × coverage
+      mat <- row_cv$muS[[1]]   # N × K
+      mat <- as.matrix(mat)
+
+      panel_title <- paste0("λ = ", lambda_lab)
+
+      # all-zero (or constant) → UMAP / ARI not meaningful
+      if (all(mat == 0) || sd(as.vector(mat)) == 0) {
+        return(
+          ggplot() +
+            geom_rect(aes(xmin = -10, xmax = 10,
+                          ymin = -10, ymax = 10),
+                      fill = NA, color = "grey70", linewidth = 0.6) +
+            annotate("text",
+                     x = 0, y = 0,
+                     label = "(all counts identical;\n UMAP / ARI not computed)",
+                     size = 4) +
+            xlab("X1") + ylab("X2") +
+            labs(
+              title    = panel_title,
+              subtitle = "ARI: NA"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "none")
+        )
+      }
+
+      # UMAP on cells (columns)
+      umap_cfg <- umap.defaults
+      umap_cfg$n_neighbors  <- n_neighbors
+      umap_cfg$random_state <- umap_seed
+
+      umap_res <- umap(t(mat), config = umap_cfg)
+      emb      <- umap_res$layout  # K × 2 matrix
+
+      # k-means in 2D UMAP space
+      km_res <- kmeans(emb,
+                       centers = 3,
+                       nstart  = n_rep)
+
+      ari_val <- adjustedRandIndex(
+        rep(1:3, each = n_rep),
+        km_res$cluster
+      )
+
+      emb_df <- data.frame(
+        X1      = emb[, 1],
+        X2      = emb[, 2],
+        Cluster = factor(km_res$cluster),
+        Type    = cell_type_label   # length 30
+      )
+
+      ggplot(emb_df, aes(x = X1, y = X2,
+                         color = Type, shape = Cluster)) +
+        geom_point(size = 3) +
+        labs(
+          title    = panel_title,
+          subtitle = paste("ARI:", round(ari_val, 3))
+        ) +
+        theme_minimal() +
+        theme(legend.position = "none")
+    })
+
+    # 5 x 2 grid (10 coverages) for this chromosome
+    do.call(
+      grid.arrange,
+      c(umap_plots,
+        ncol = 5,
+        top  = paste0("Chromosome ", chr_id,
+                      " — UMAP clustering of downsampled counts Y across λ"))
+    )
+  }
+}
+
+## Example call:
+## (assuming list_y_sim is your tibble and cell_type_label is defined)
+plot_umap_simY_by_chr_tbl(list_y_sim,
+                          n_neighbors = 10,
+                          n_rep       = 10,
+                          umap_seed   = 12345)
+```
+
+
+```{r}
+N = 4950
+K = 30
+
+## 1. Coverage levels (make sure we match muS_unified)
+cov_levels <- levels(muS_unified$coverage)
+lambda_vals <- as.numeric(as.character(cov_levels))
+
+## 2. Chromosomes (take from list_muS names, ensure numeric + sorted)
+chr_vec <- names(list_muS) %>% as.integer() %>% sort()
+
+## 3. Design grid: all chr × coverage combinations
+design_sim <- tidyr::crossing(
+  chr      = chr_vec,
+  coverage = factor(lambda_vals, levels = lambda_vals, ordered = TRUE)
+)
+
+## 4. Build tibble with same structure as muS_unified
+sim_unified <- design_sim %>%
+  mutate(
+    model = "Simulated (Raw)",
+    muS = purrr::pmap(
+      list(chr, coverage),
+      function(chr, coverage) {
+        true_muS <- list_muS[[as.character(chr)]]
+        N <- nrow(true_muS)
+        K <- ncol(true_muS)
+        lam <- as.numeric(as.character(coverage))
+
+        ## mimic your original simulation
+        set.seed(123456)
+        mat <- matrix(
+          rpois(N * K, lambda = lam * as.numeric(true_muS)),
+          nrow = N, ncol = K
+        )
+        # keep the same cell labels
+        colnames(mat) <- colnames(true_muS)
+        mat
+      }
+    ),
+    N = map_int(chr, ~ nrow(list_muS[[as.character(.x)]])),
+    K = map_int(chr, ~ ncol(list_muS[[as.character(.x)]]))
+  ) %>%
+  select(model, chr, coverage, muS, N, K)
+
+## 5. Combine with existing results if you want
+all_models_unified <- bind_rows(sim_unified, muS_unified)
+
+str(sim_unified)
+# should look like muS_unified: tibble [500 × 6] with list-column muS
+```
+
+```{r}
+unique(all_models_unified$model)
+unique(all_models_unified$chr)
+levels(all_models_unified$coverage)
+```
+
+# Clustering using chr1
+
+## Rstne
+
+```{r, fig.width=12}
+library(Rtsne)
+library(mclust)      # for adjustedRandIndex
+library(gridExtra)
+
+## optional: ensure consistent model order
+model_levels <- c("Simulated (Raw)",
+                  "HiCBZIP-GB(NB)",
+                  "HiCBZIP-N(GS)",
+                  "HiCBZIP-N(M)",
+                  "HiCImpute",
+                  "scHiCluster")
+
+## function: make 2x3 t-SNE grid for each coverage on chr1
+plot_tsne_chr1_by_coverage <- function(all_models_unified,
+                                       chr_id = 1,
+                                       npc = 20,
+                                       pplx = 7,
+                                       n_rep = 10) {
+# chr_id=1;npc=20;pplx=7;n_rep=10;
+  # subset to this chromosome
+  chr_dat <- all_models_unified %>%
+    filter(chr == chr_id)
+
+  # make sure coverage is ordered in the way you want
+  cov_levels <- levels(chr_dat$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(chr_dat$coverage))
+  }
+
+  for (covg in cov_levels) {
+    # covg = 0.1
+    # message("Coverage = ", covg)
+
+    dat_cov <- chr_dat %>%
+      filter(coverage == covg) %>%
+      mutate(model = factor(model,
+                            levels = model_levels[model_levels %in% model])) %>%
+      arrange(model)
+
+    # list of matrices, named by model (including "Downsampled")
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    set.seed(123456)
+    tsne_plots <- lapply(seq_along(list_muS_cov), function(i) {
+  mat <- list_muS_cov[[i]]        # N x K, rows = pairs, cols = cells
+  model_name <- names(list_muS_cov)[i]
+
+  # 1) Handle all-zero (or constant) imputation: t-SNE + ARI not meaningful
+  if (all(mat == 0) || sd(as.vector(mat)) == 0) {
+    ari_val <- NA_real_
+
+    # Simple placeholder panel explaining what happened
+    p <- ggplot() +
+    geom_rect(aes(xmin = -100, xmax = 100, ymin = -100, ymax = 100),
+              fill = NA, color = "grey70", linewidth = 0.6) +
+    annotate("text",
+             x = 0, y = 0,
+             label = paste0("(all imputed values = 0;\n",
+                            "t-SNE / ARI not computed)"),
+             size = 4) +
+    xlab("X1") + ylab("X2") +
+    labs(
+      title    = model_name,
+      subtitle = paste("ARI:NA")
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+
+    return(p)
+  }
+
+  # 2) Normal case: run t-SNE + k-means + ARI
+  tsne_res <- Rtsne(t(mat),
+                    initial_dims = npc,
+                    perplexity   = pplx,
+                    theta        = 0,
+                    pca_center   = FALSE)
+
+  km_res <- kmeans(tsne_res$Y,
+                   centers = 3,
+                   nstart  = n_rep)
+
+  ari_val <- adjustedRandIndex(rep(1:3, each = n_rep),
+                               km_res$cluster)
+
+  emb_df <- data.frame(
+    X1      = tsne_res$Y[, 1],
+    X2      = tsne_res$Y[, 2],
+    Cluster = factor(km_res$cluster),
+    Type    = cell_type_label   # length 30
+  )
+
+  ggplot(emb_df, aes(x = X1, y = X2,
+                     color = Type, shape = Cluster)) +
+    geom_point(size = 3) +
+    labs(
+      title    = model_name,
+      subtitle = paste("ARI:", round(ari_val, 3))
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+})
+    # 2 x 3 grid for this coverage
+    do.call(
+      grid.arrange,
+      c(tsne_plots,
+        ncol = 3,
+        top  = paste0("chr", chr_id, ", coverage λ = ", covg))
+    )
+  }
+}
+
+## Example call (after you created all_models_unified = bind_rows(muS_unified, sim_unified)):
+plot_tsne_chr1_by_coverage(all_models_unified, chr_id = 1, npc = 20, pplx = 7, n_rep = n_rep)
+```
+
+
+## UMAP
+
+```{r, fig.width=12}
+library(umap)
+library(mclust)
+
+plot_umap_chr1_by_coverage <- function(all_models_unified,
+                                       chr_id = 1,
+                                       n_neighbors = 10,
+                                       n_rep = 10) {
+
+  # subset to chosen chromosome
+  chr_dat <- all_models_unified %>%
+    dplyr::filter(chr == chr_id)
+
+  # coverage levels in desired order
+  cov_levels <- levels(chr_dat$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(chr_dat$coverage))
+  }
+
+  for (covg in cov_levels) {
+    dat_cov <- chr_dat %>%
+      dplyr::filter(coverage == covg) %>%
+      dplyr::mutate(
+        model = factor(model,
+                       levels = model_levels[model_levels %in% model])
+      ) %>%
+      dplyr::arrange(model)
+
+    # list of matrices for this coverage
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    set.seed(123456)
+    umap_plots <- lapply(seq_along(list_muS_cov), function(i) {
+      mat <- list_muS_cov[[i]]        # N x K
+      model_name <- names(list_muS_cov)[i]
+
+      # 1) all-zero or constant case → placeholder panel
+      if (all(mat == 0) || stats::sd(as.vector(mat)) == 0) {
+        ggplot() +
+          geom_rect(aes(xmin = -10, xmax = 10, ymin = -10, ymax = 10),
+                    fill = NA, color = "grey70", linewidth = 0.6) +
+          annotate("text",
+                   x = 0, y = 0,
+                   label = "(all imputed values = 0;\nUMAP / ARI not computed)",
+                   size = 4) +
+          xlab("X1") + ylab("X2") +
+          labs(
+            title    = model_name,
+            subtitle = "ARI: NA"
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      } else {
+        # 2) normal case: run UMAP + k-means + ARI
+        umap_cfg <- umap.defaults
+        umap_cfg$n_neighbors   <- n_neighbors
+        umap_cfg$random_state  <- 123456
+
+        umap_res <- umap(t(mat), config = umap_cfg)
+        emb <- as.data.frame(umap_res$layout)
+        colnames(emb) <- c("X1", "X2")
+
+        km_res <- kmeans(emb, centers = 3, nstart = n_rep)
+
+        ari_val <- adjustedRandIndex(
+          km_res$cluster,
+          rep(1:3, each = n_rep)
+        )
+
+        emb_df <- data.frame(
+          X1      = emb$X1,
+          X2      = emb$X2,
+          Cluster = factor(km_res$cluster),
+          Type    = cell_type_label   # length 30
+        )
+
+        ggplot(emb_df, aes(x = X1, y = X2,
+                           color = Type, shape = Cluster)) +
+          geom_point(size = 3) +
+          labs(
+            title    = model_name,
+            subtitle = paste("ARI:", round(ari_val, 3))
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      }
+    })
+
+    # 2 x 3 grid for this coverage
+    do.call(
+      grid.arrange,
+      c(umap_plots,
+        ncol = 3,
+        top  = paste0("chr", chr_id, ", coverage λ = ", covg, " (UMAP)"))
+    )
+  }
+}
+
+# Example call
+plot_umap_chr1_by_coverage(all_models_unified,
+                           chr_id = 1,
+                           n_neighbors = n_rep,
+                           n_rep = n_rep)
+
+```
+
+# Clustering using chr10
+
+
+```{r, fig.width=10}
+plot_tsne_chr1_by_coverage(all_models_unified, chr_id = 10, npc = 20, pplx = 7, n_rep = n_rep)
+```
+
+```{r, fig.width=10}
+plot_umap_chr1_by_coverage(all_models_unified, chr_id = 10, n_neighbors = n_rep,n_rep = n_rep)
+```
+
+# Clustering using chr16
+
+
+```{r, fig.width=10}
+plot_tsne_chr1_by_coverage(all_models_unified, chr_id = 16, npc = 20, pplx = 7, n_rep = n_rep)
+```
+
+
+
+```{r, fig.width=10}
+plot_umap_chr1_by_coverage(all_models_unified,chr_id = 16,n_neighbors = n_rep,n_rep = n_rep)
+```
+
+
+
+# Clustering using all chr
+
+```{r}
+# all_models_unified: model, chr, coverage, muS (N x K matrix), N, K
+
+allchr_unified <- all_models_unified %>%
+  arrange(coverage, model, chr) %>%              # ensure consistent chr order
+  group_by(model, coverage) %>%
+  summarise(
+    muS = list(do.call(rbind, muS)),            # stack loci across all chromosomes
+    N   = sum(N),                               # total number of pairs
+    K   = first(K),                             # number of cells (should be 30)
+    .groups = "drop"
+  ) %>%
+  mutate(chr = "all") %>%                       # optional: dummy chr label
+  relocate(chr, .after = coverage)
+
+str(allchr_unified)
+# tibble [ (#models * #coverages) x 6 ]:
+#   model, coverage, chr = "all", muS (N_total x K), N, K
+
+```
+
+```{r, fig.width=10}
+plot_tsne_allchr_by_coverage <- function(allchr_unified,
+                                         npc = 20,
+                                         pplx = 7,
+                                         n_rep = 10) {
+
+  # make sure coverage is ordered
+  cov_levels <- levels(allchr_unified$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(allchr_unified$coverage))
+  }
+
+  for (covg in cov_levels) {
+    dat_cov <- allchr_unified %>%
+      filter(coverage == covg) %>%
+      mutate(
+        model = factor(model,
+                       levels = model_levels[model_levels %in% model])
+      ) %>%
+      arrange(model)
+
+    # list of combined matrices (all chromosomes) for this coverage
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    set.seed(123456)
+    tsne_plots <- lapply(seq_along(list_muS_cov), function(i) {
+      mat <- list_muS_cov[[i]]          # N_total x K
+      model_name <- names(list_muS_cov)[i]
+
+      # all-zero / constant → placeholder
+      if (all(mat == 0) || sd(as.vector(mat)) == 0) {
+        ggplot() +
+          geom_rect(aes(xmin = -100, xmax = 100,
+                        ymin = -100, ymax = 100),
+                    fill = NA, color = "grey70", linewidth = 0.6) +
+          annotate("text",
+                   x = 0, y = 0,
+                   label = "(all imputed values = 0;\n t-SNE / ARI not computed)",
+                   size = 4) +
+          xlab("X1") + ylab("X2") +
+          labs(
+            title    = model_name,
+            subtitle = "ARI: NA"
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      } else {
+        # normal case: t-SNE + k-means + ARI
+        tsne_res <- Rtsne(t(mat),
+                          initial_dims = npc,
+                          perplexity   = pplx,
+                          theta        = 0,
+                          pca_center   = FALSE)
+
+        km_res <- kmeans(tsne_res$Y,
+                         centers = 3,
+                         nstart  = n_rep)
+
+        ari_val <- adjustedRandIndex(
+          rep(1:3, each = n_rep),
+          km_res$cluster
+        )
+
+        emb_df <- data.frame(
+          X1      = tsne_res$Y[,1],
+          X2      = tsne_res$Y[,2],
+          Cluster = factor(km_res$cluster),
+          Type    = cell_type_label  # length 30
+        )
+
+        ggplot(emb_df, aes(x = X1, y = X2,
+                           color = Type, shape = Cluster)) +
+          geom_point(size = 3) +
+          labs(
+            title    = model_name,
+            subtitle = paste("ARI:", round(ari_val, 3))
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      }
+    })
+
+    # 2 x 3 grid for this coverage
+    do.call(
+      grid.arrange,
+      c(tsne_plots,
+        ncol = 3,
+        top  = paste0("All chromosomes combined, coverage λ = ", covg))
+    )
+  }
+}
+
+plot_tsne_allchr_by_coverage(allchr_unified, npc = 20, pplx = 8, n_rep = n_rep)
+
+```
+
+```{r, fig.width=10}
+plot_umap_allchr_by_coverage <- function(allchr_unified,
+                                       n_neighbors = 10,
+                                       n_rep = 10) {
+
+  # subset to chosen chromosome
+  chr_dat <- allchr_unified
+
+  # coverage levels in desired order
+  cov_levels <- levels(chr_dat$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(chr_dat$coverage))
+  }
+
+  for (covg in cov_levels) {
+    dat_cov <- chr_dat %>%
+      dplyr::filter(coverage == covg) %>%
+      dplyr::mutate(
+        model = factor(model,
+                       levels = model_levels[model_levels %in% model])
+      ) %>%
+      dplyr::arrange(model)
+
+    # list of matrices for this coverage
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    set.seed(12345)
+    umap_plots <- lapply(seq_along(list_muS_cov), function(i) {
+      mat <- list_muS_cov[[i]]        # N x K
+      model_name <- names(list_muS_cov)[i]
+
+      # 1) all-zero or constant case → placeholder panel
+      if (all(mat == 0) || stats::sd(as.vector(mat)) == 0) {
+        ggplot() +
+          geom_rect(aes(xmin = -10, xmax = 10, ymin = -10, ymax = 10),
+                    fill = NA, color = "grey70", linewidth = 0.6) +
+          annotate("text",
+                   x = 0, y = 0,
+                   label = "(all imputed values = 0;\nUMAP / ARI not computed)",
+                   size = 4) +
+          xlab("X1") + ylab("X2") +
+          labs(
+            title    = model_name,
+            subtitle = "ARI: NA"
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      } else {
+        # 2) normal case: run UMAP + k-means + ARI
+        umap_cfg <- umap.defaults
+        umap_cfg$n_neighbors   <- n_neighbors
+        umap_cfg$random_state  <- 123456
+
+        umap_res <- umap(t(mat), config = umap_cfg)
+        emb <- as.data.frame(umap_res$layout)
+        colnames(emb) <- c("X1", "X2")
+
+        km_res <- kmeans(emb, centers = 3, nstart = n_rep)
+
+        ari_val <- adjustedRandIndex(
+          km_res$cluster,
+          rep(1:3, each = n_rep)
+        )
+
+        emb_df <- data.frame(
+          X1      = emb$X1,
+          X2      = emb$X2,
+          Cluster = factor(km_res$cluster),
+          Type    = cell_type_label   # length 30
+        )
+
+        ggplot(emb_df, aes(x = X1, y = X2,
+                           color = Type, shape = Cluster)) +
+          geom_point(size = 3) +
+          labs(
+            title    = model_name,
+            subtitle = paste("ARI:", round(ari_val, 3))
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      }
+    })
+
+    # 2 x 3 grid for this coverage
+    do.call(
+      grid.arrange,
+      c(umap_plots,
+        ncol = 3,
+        top  = paste0("chr", chr_id, ", coverage λ = ", covg, " (UMAP)"))
+    )
+  }
+}
+
+# Example call
+plot_umap_allchr_by_coverage(allchr_unified,
+                           n_neighbors = n_rep,
+                           n_rep = n_rep)
+```
+

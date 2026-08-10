@@ -1,0 +1,340 @@
+---
+title: "display_NPC250k_0h_X_fasthigashi_260704"
+author: "Xuan Chen"
+date: "2026-07-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = TRUE)
+rm(list = ls())
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+source(file.path("..", "_common", "project_paths.R"))
+knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
+```
+
+```{r}
+source_hicbzip_core()
+source(path_here("simulations", "manuscript_figure_helpers.R"))
+```
+
+## Load Saved Output
+
+```{r}
+load(path_here("data", "processed", "real_data_study_1", "list_muS_unified_260614.RData"))
+```
+
+## Setup
+
+```{r}
+fig_dir <- path_here("results", "real_data_study_1", "figures")
+heatmap_dir <- file.path(fig_dir, "heatmaps")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(heatmap_dir, recursive = TRUE, showWarnings = FALSE)
+
+method_levels_display <- c(
+  "Raw",
+  "HiCBZIP-GB(NB)",
+  "HiCBZIP-N(M)",
+  "HiCImpute",
+  "scHiCluster",
+  "Higashi",
+  "Fast-Higashi"
+)
+
+method_label_map <- c(
+  "Raw" = "Simulated (Raw)",
+  "HiCBZIP-GB(NB)" = "HiCBZIP-GB(NB)",
+  "HiCBZIP-N(M)" = "HiCBZIP-N(M)",
+  "HiCImpute" = "HiCImpute",
+  "scHiCluster" = "scHiCluster",
+  "Higashi" = "Higashi",
+  "Fast-Higashi" = "Fast-Higashi"
+)
+
+cov_label_df <- tibble(
+  coverage = lambda_list,
+  coverage_label = paste0(lambda_list, "\n", sparsity_labels, " zero")
+)
+
+K_display <- ncol(list_muS_combine[[1]])
+first_cell_col <- 1
+first_cell_label <- paste0("cell ", first_cell_col)
+```
+
+## Heatmap Table
+
+```{r}
+heatmap_cov <- "1e-02"
+
+heatmap_df <- tibble(
+  method = c("Truth", method_levels_display),
+  method_label = c("Truth", unname(method_label_map[method_levels_display])),
+  muS = c(
+    list(replicate(K_display, bulk)),
+    lapply(method_levels_display, function(method_i) {
+      list_muS_combine[[paste0(method_i, ",ld=", heatmap_cov)]]
+    })
+  )
+) %>%
+  mutate(
+    q95 = map_dbl(muS, ~ quantile(.x, 0.95, na.rm = TRUE)),
+    q99 = map_dbl(muS, ~ quantile(.x, 0.99, na.rm = TRUE)),
+    mean_value = map_dbl(muS, ~ mean(.x, na.rm = TRUE)),
+    maxi_plot = q95 * 2
+  )
+
+heatmap_df %>%
+  select(method_label, q95, q99, mean_value, maxi_plot)
+```
+
+## First-Cell Heatmap Comparison
+
+```{r, fig.width=12, fig.height=6}
+plot_first_cell_heatmaps_real1 <- function(heatmap_df) {
+  panel_title_size <- 12
+  axis_title_size <- 8
+  axis_text_size <- 8
+  top_title_size <- 16
+  tick_by <- 100
+
+  plots <- lapply(seq_len(nrow(heatmap_df)), function(i) {
+    model_i <- as.character(heatmap_df$method_label[[i]])
+    maxi_i <- heatmap_df$maxi_plot[[i]]
+    x <- matrix_long_to_matrix2D(heatmap_df$muS[[i]][, first_cell_col])
+
+    mat_to_heatmap(x, maxi_i) +
+      theme_minimal() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(size = panel_title_size, hjust = 0.5),
+        axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+      ) +
+      scale_y_continuous(breaks = seq(0, nrow(x), by = tick_by)) +
+      scale_x_continuous(breaks = seq(0, nrow(x), by = tick_by)) +
+      ggtitle(model_i)
+  })
+
+  gridExtra::grid.arrange(
+    grobs = plots,
+    ncol = 4,
+    top = grid::textGrob(
+      label = bquote("NPC250k, Cell 1, Chr X, " * lambda == .(as.numeric(heatmap_cov))),
+      gp = grid::gpar(fontsize = top_title_size, fontface = "bold")
+    )
+  )
+}
+
+plot_first_cell_heatmaps_real1(heatmap_df)
+```
+
+```{r}
+png(
+  filename = file.path(heatmap_dir, "heatmap_first_cell_all_methods_real1_NPC250k_0h_chrX.png"),
+  width = 1800,
+  height = 1000,
+  res = 220
+)
+plot_first_cell_heatmaps_real1(heatmap_df)
+dev.off()
+```
+
+## First-Cell Heatmap Comparison (log1p Scale)
+
+```{r, fig.width=12, fig.height=6}
+plot_first_cell_heatmaps_real1_log1p <- function(heatmap_df) {
+  panel_title_size <- 12
+  axis_title_size <- 8
+  axis_text_size <- 8
+  top_title_size <- 16
+  tick_by <- 100
+
+  plots <- lapply(seq_len(nrow(heatmap_df)), function(i) {
+    model_i <- as.character(heatmap_df$method_label[[i]])
+    x <- matrix_long_to_matrix2D(heatmap_df$muS[[i]][, first_cell_col])
+    x_log1p <- log1p(x)
+    count_max_i <- as.numeric(stats::quantile(x_log1p, 0.99, na.rm = TRUE))
+    if (!is.finite(count_max_i)) count_max_i <- max(x_log1p, na.rm = TRUE)
+    count_max_i <- max(count_max_i, 1e-6)
+
+    mat_to_heatmap(x_log1p, count_max_i) +
+      theme_minimal() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(size = panel_title_size, hjust = 0.5),
+        axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+      ) +
+      scale_y_continuous(breaks = seq(0, nrow(x_log1p), by = tick_by)) +
+      scale_x_continuous(breaks = seq(0, nrow(x_log1p), by = tick_by)) +
+      ggtitle(model_i)
+  })
+
+  gridExtra::grid.arrange(
+    grobs = plots,
+    ncol = 4,
+    top = grid::textGrob(
+      label = bquote("NPC250k, Cell 1, Chr X, " * lambda == .(as.numeric(heatmap_cov))),
+      gp = grid::gpar(fontsize = top_title_size, fontface = "bold")
+    )
+  )
+}
+
+plot_first_cell_heatmaps_real1_log1p(heatmap_df)
+```
+
+```{r}
+png(
+  filename = file.path(heatmap_dir, "heatmap_first_cell_all_methods_real1_NPC250k_0h_chrX_log1p.png"),
+  width = 1800,
+  height = 1000,
+  res = 220
+)
+plot_first_cell_heatmaps_real1_log1p(heatmap_df)
+dev.off()
+```
+
+## SCC Across Coverage
+
+```{r}
+scc_display <- scc_muS %>%
+  mutate(
+    Method = recode(as.character(Method), !!!method_label_map),
+    Method = factor(Method, levels = c("Simulated (Raw)", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
+    coverage = factor(ld, levels = lambda_list, ordered = TRUE)
+  ) %>%
+  filter(Method != "Simulated (Raw)") %>%
+  left_join(cov_label_df, by = c("ld" = "coverage"))
+```
+
+```{r, fig.width=8, fig.height=6}
+p_scc_real1 <- ggplot(
+  scc_display,
+  aes(x = ld_num, y = SCC, fill = Method, color = Method, group = interaction(Method, ld_num))
+) +
+  geom_boxplot(
+    outlier.size = 0.8,
+    width = 0.24,
+    linewidth = 0.45,
+    position = position_dodge(width = 0.24)
+  ) +
+  scale_x_log10(
+    breaks = lambda_vals,
+    labels = names(sparsity_list),
+    sec.axis = dup_axis(
+      breaks = lambda_vals,
+      labels = sparsity_labels,
+      name = "Sparsity"
+    )
+  ) +
+  labs(
+    x = expression(lambda),
+    y = "SCC",
+    title = "Stratum-Adjusted Correlation Coefficient Across Coverage Levels"
+  ) +
+  manuscript_theme() +
+  theme(
+    axis.text.x.top = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+    axis.title.x.top = element_text(margin = margin(b = 8))
+  )
+
+p_scc_real1 <- apply_manuscript_colors(p_scc_real1)
+p_scc_real1
+```
+
+```{r}
+save_manuscript_plot(
+  p_scc_real1,
+  "real1_scc",
+  fig_dir = fig_dir,
+  width = 8,
+  height = 6
+)
+```
+
+## IS Across Coverage
+
+```{r}
+IS_display <- IS_vector_plot2 %>%
+  mutate(
+    Method = recode(as.character(Method), !!!method_label_map),
+    Method = factor(Method, levels = c("Simulated (Raw)", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
+    coverage = factor(ld, levels = lambda_list, ordered = TRUE)
+  ) %>%
+  filter(Method != "Simulated (Raw)") %>%
+  left_join(cov_label_df, by = c("ld" = "coverage"))
+```
+
+```{r, fig.width=8, fig.height=6}
+p_is_real1 <- ggplot(
+  IS_display,
+  aes(x = ld_num, y = IS, fill = Method, color = Method, group = interaction(Method, ld_num))
+) +
+  geom_boxplot(
+    outlier.size = 0.8,
+    width = 0.24,
+    linewidth = 0.45,
+    position = position_dodge(width = 0.25)
+  ) +
+  scale_x_log10(
+    breaks = lambda_vals,
+    labels = names(sparsity_list),
+    sec.axis = dup_axis(
+      breaks = lambda_vals,
+      labels = sparsity_labels,
+      name = "Sparsity"
+    )
+  ) +
+  labs(
+    x = expression(lambda),
+    y = "Pearson Correlation",
+    title = "Pearson Correlation of Insulation Scores Across Coverage Levels"
+  ) +
+  manuscript_theme() +
+  theme(
+    axis.text.x.top = element_text(angle = 0, hjust = 0.5, vjust = 0.5),
+    axis.title.x.top = element_text(margin = margin(b = 8))
+  )
+
+p_is_real1 <- apply_manuscript_colors(p_is_real1)
+p_is_real1
+```
+
+```{r}
+save_manuscript_plot(
+  p_is_real1,
+  "real1_is_boxplot",
+  fig_dir = fig_dir,
+  width = 8,
+  height = 6
+)
+```
+
+## Quick Summary Tables
+
+```{r}
+scc_display %>%
+  group_by(Method, ld) %>%
+  summarise(
+    mean_scc = mean(SCC, na.rm = TRUE),
+    median_scc = median(SCC, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+IS_display %>%
+  group_by(Method, ld) %>%
+  summarise(
+    mean_is = mean(IS, na.rm = TRUE),
+    median_is = median(IS, na.rm = TRUE),
+    .groups = "drop"
+  )
+```

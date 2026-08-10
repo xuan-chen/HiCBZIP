@@ -1,0 +1,1114 @@
+---
+title: "Simulation manuscript metrics"
+author: "Xuan Chen"
+date: "2026-02-08"
+output: html_document
+---
+
+# Notes
+
+1. Correct N(GS) scaling
+2. Compare IS
+3. Combine Higashi
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = T)
+rm(list=ls())
+library(tidyverse)
+library(rstan)
+library(magrittr)
+source(file.path("..", "_common", "project_paths.R"))
+knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
+```
+
+```{r}
+source_hicbzip_core()
+```
+
+## Combine Higashi
+
+```{r}
+load(path_here("data", "processed", "simulation", "muS_combined_plot_260124.RData"))
+load(path_here("data", "processed", "simulation", "higashi_unified_allchr_260208.RData"))
+```
+
+
+
+```{r}
+higashi_unified$muS =  lapply(higashi_unified$muS, function(s) {
+  apply(s, 2, function(x){
+    m2d <- matrix_long_to_matrix2D_offdiag(x, triangle = "upper")
+    matrix2D_to_matrix_long(m2d, include.diag = FALSE)
+  })
+})
+ori_unified = higashi_unified %>% filter(model == "Higashi(ori)")
+
+for (i in 2:4){
+  sim_unified$muS[[i]][,c(1,11,21,2,12,22)] %>% mat_long_to_heatmaps(.,
+                     n_plot = 6, maxi = 3, title = sim_unified$model[[i]])
+}
+
+for (i in 1:3){
+  ori_unified$muS[[i]][,c(1,11,21,2,12,22)] %>% mat_long_to_heatmaps(.,
+                     n_plot = 6, maxi = 3, title = ori_unified$model[[i]])
+}
+```
+
+
+```{r}
+higashi_nbr5 = higashi_unified %>% filter(model == "Higashi(nbr5)") 
+higashi_nbr5$model = "Higashi"
+
+all_models_unified = bind_rows(all_models_unified, higashi_nbr5)
+all_models_unified$model = factor(all_models_unified$model, levels = unique(all_models_unified$model))
+table(all_models_unified$model)
+```
+
+```{r}
+final_levels = unique(all_models_unified$model)
+```
+
+
+
+## Check Scaling
+
+```{r}
+true_by_chr$`1` %>% mean()
+all_models_unified %>% filter(chr == "1", coverage == "0.2") %>% group_by(model) %>% summarise(mean = mean(muS[[1]]))
+```
+
+
+## MSE
+
+### MSE scaling using mean for scHiCluster and Higashi
+
+```{r}
+scale_sc_mat <- function(M, Theta, method = c("zisc","mean"), eps = 1e-12) {
+  method <- match.arg(method)
+  stopifnot(ncol(M) == ncol(Theta))   # same number of cells
+  K <- ncol(M)
+
+  if (method == "zisc") {
+    # zero-intercept scaling: least-squares
+    num <- colSums(Theta * M)
+    den <- colSums(M^2) + eps
+    beta <- num / den
+  } else if (method == "mean") {
+    # mean-scaling: preserve total contacts per cell
+    num <- colSums(Theta)
+    den <- colSums(M) + eps
+    beta <- num / den
+  }
+
+  scaled <- sweep(M, 2, beta, `*`)
+  pmax(scaled, 0)
+}
+
+# --- scale scHiCluster matrices for all chromosomes ---
+sc_scaled_all <- all_models_unified %>%
+  filter(model %in% c("scHiCluster", "Higashi")) %>%
+  mutate(
+    muS = map2(muS, chr, ~ {
+      Theta <- true_by_chr[[as.character(.y)]]
+      scale_sc_mat(.x, Theta, method = "mean")
+    })
+  ) %>%
+  mutate(model = paste0(model, "(scaled)"))
+
+muS_unified_MSE = bind_rows(muS_unified, sc_scaled_all) %>% filter(!(model %in%  c("scHiCluster", "Higashi")))
+```
+
+
+### Calculating MSE
+
+```{r}
+get_SMRE <- function(truth, pred) {
+  MSE <- mean((pred - truth)^2)
+  var_truth <- stats::var(truth)
+  MSE / var_truth
+}
+# Containers
+MSE_row_list     <- vector("list", nrow(muS_unified_MSE))
+MSE_overall_list <- vector("list", nrow(muS_unified_MSE))
+
+for (i in seq_len(nrow(muS_unified_MSE))) {
+  row_i   <- muS_unified_MSE[i, ]
+  model_i <- as.character(row_i$model)
+  chr_i   <- as.character(row_i$chr)
+  cov_i   <- as.character(row_i$coverage)
+  mu_i    <- row_i$muS[[1]]                # N × K
+  trueM   <- true_by_chr[[chr_i]]          # N × K
+
+  if (is.null(trueM)) next
+
+  # --- Row-wise SMSE across cells ---
+  # MSE_row(i) = mean_k (mu(i,k)-true(i,k))^2
+  # SMSE_row(i) = MSE_row(i) / var_k(true(i,k))
+  diff2          <- (mu_i - trueM)^2                 # N×K
+  mse_row        <- rowMeans(diff2)                  # length N
+  var_truth_row  <- apply(trueM, 1, stats::var)      # length N
+  smse_row       <- mse_row / pmax(var_truth_row, 1e-12)
+
+  MSE_row_list[[i]] <- tibble(
+    model    = model_i,
+    chr      = as.integer(chr_i),
+    coverage = cov_i,
+    pair_id  = seq_len(nrow(mu_i)),
+    SMSE     = smse_row
+  )
+
+  # --- Overall SMSE (flatten) ---
+  SMSE_overall <- get_SMRE(as.vector(trueM), as.vector(mu_i))
+  MSE_overall_list[[i]] <- tibble(
+    model    = model_i,
+    chr      = as.integer(chr_i),
+    coverage = cov_i,
+    SMSE_overall = SMSE_overall
+  )
+}
+
+MSE_row_df <- bind_rows(MSE_row_list) %>%
+  mutate(
+    coverage = factor(coverage, levels = lambda_list),
+    chr = as.integer(chr),
+    model = factor(model)
+  )
+
+MSE_overall_df <- bind_rows(MSE_overall_list) %>%
+  mutate(
+    coverage = factor(coverage, levels = lambda_list),
+    chr = as.integer(chr)
+  ) 
+
+if (exists("region_info")) {
+  MSE_row_df     <- MSE_row_df     %>% left_join(region_info %>% select(chr, facet_label), by = "chr")
+  MSE_overall_df <- MSE_overall_df %>% left_join(region_info %>% select(chr, facet_label), by = "chr")
+  facet_var <- "facet_label"
+} else {
+  facet_var <- "chr"
+}
+
+MSE_row_df$model = factor(MSE_row_df$model, levels = unique(MSE_row_df$model))
+MSE_overall_df$model = factor(MSE_overall_df$model, levels = unique(MSE_overall_df$model))
+```
+
+
+
+
+### p_MSE
+
+
+```{r, fig.width=15, fig.height=6}
+p_MSE_row = ggplot(MSE_row_df, aes(x = coverage, y = SMSE, fill = model, color = model)) +
+  # geom_boxplot(
+  #   width = 0.5,
+  #   position = position_dodge(width = 0.6),
+  #   outlier.shape = 21, outlier.size = 0.7, outlier.stroke = 0.25,
+  #   linewidth = 0.3
+  # ) +
+  # geom_boxplot(outlier.size = 0.1, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  geom_boxplot(outliers = F, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE (per pair)",
+    title = "Row-wise SMSE of μ·(1−S) across Chromosomes"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_MSE_row
+```
+
+```{r, fig.width=15, fig.height=6}
+p_MSE_overall = ggplot(MSE_overall_df, aes(x = coverage, y = SMSE_overall, fill = model)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE (overall)",
+    title = "Overall SMSE of μ·(1−S) across Chromosomes and coverage levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_MSE_overall
+```
+
+
+
+
+## SCC
+
+```{r}
+scc_all <- all_models_unified %>%
+  # filter(chr == "1", coverage == "0.03", model == "Simulated (Raw)") %>%
+  rowwise() %>%
+  mutate(
+    trueM = list(true_by_chr[[as.character(chr)]]),
+    SCC   = list(map_dbl(seq_len(K), function(k) {
+      out <- evaluate_mu(trueM[, k], muS[, k], smooth = 0)[5]
+      # handle either numeric or list outputs
+      if (is.numeric(out) && length(out) == 1) out else out[["SCC"]]
+    })),
+    method = model
+  ) %>%
+  ungroup() %>%
+  select(chr, coverage, SCC, method) %>%
+  unnest_longer(SCC, indices_to = "cell") %>% 
+  left_join(region_info %>% select(chr, facet_label), by = "chr")
+```
+
+
+### p_SCC
+
+```{r, fig.width=15, fig.height=6}
+p_scc = ggplot(scc_all %>% filter(method != "Simulated (Raw)"), aes(x = coverage, y = SCC, fill = method, color = method)) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.2) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    title = "SCC (Stratum-Adjusted Correlation Coefficient) across chromosomes and coverage levels",
+    x = "Coverage (λ)",
+    y = "SCC"
+  ) +
+  # scale_fill_brewer(palette = "Set2") +
+  # scale_color_brewer(palette = "Set2") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_scc
+```
+
+
+
+## IS
+
+
+
+```{r, warning=F}
+IS_list <- vector("list", nrow(all_models_unified))
+
+for (i in seq_len(nrow(all_models_unified))) {
+  row_i  <- all_models_unified[i, ]
+  model_i <- as.character(row_i$model)
+  chr_i   <- as.character(row_i$chr)
+  cov_i   <- as.character(row_i$coverage)
+  mu_i    <- row_i$muS[[1]]
+
+  trueM <- true_by_chr[[chr_i]]
+  if (is.null(trueM)) next
+
+  IS_vec <- tryCatch(
+    get_IS_cor(trueM, mu_i, n_cell = ncol(mu_i), win_size = 5, resolution = resolution),
+    error = function(e) rep(NA_real_, ncol(mu_i))
+  )
+  IS_vec[is.na(IS_vec)] <- 0
+
+  IS_list[[i]] <- data.frame(
+    model    = model_i,
+    chr      = as.numeric(chr_i),
+    coverage = cov_i,
+    cell     = seq_len(ncol(mu_i)),
+    IS       = as.numeric(IS_vec),
+    stringsAsFactors = FALSE
+  )
+}
+
+IS_df <- bind_rows(IS_list) %>%
+  mutate(
+    coverage = factor(coverage, levels = lambda_list),
+    model    = factor(model, levels = unique(all_models_unified$model))
+  ) %>%
+  left_join(region_info %>% select(chr, facet_label), by = "chr")
+
+```
+
+
+### p_IS
+
+```{r, fig.width=15, fig.height=6}
+p_IS=ggplot(IS_df %>% filter(model != "Simulated (Raw)"), aes(x = coverage, y = IS, fill = model, color = model)) +
+  # geom_boxplot(
+  #   width = 0.5,
+  #   position = position_dodge(width = 0.6),
+  #   outlier.shape = 21,
+  #   outlier.size = 0.8,
+  #   outlier.stroke = 0.25,
+  #   linewidth = 0.3
+  # ) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.1) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    x = expression(lambda),
+    y = "Pearson Correlation (IS)",
+    title = "Pearson correlation of insulation scores with ground truth across chromosomes and coverage levels",
+    fill = "Model",
+    color = "Model"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_IS
+```
+
+```{r, fig.width=15, fig.height=8}
+ggplot(IS_df , aes(x = coverage, y = IS, fill = model, color = model)) +
+  # geom_boxplot(
+  #   width = 0.5,
+  #   position = position_dodge(width = 0.6),
+  #   outlier.shape = 21,
+  #   outlier.size = 0.8,
+  #   outlier.stroke = 0.25,
+  #   linewidth = 0.3
+  # ) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    x = expression(lambda),
+    y = "Pearson Correlation (IS)",
+    title = "Pearson correlation of insulation scores with ground truth across chromosomes and coverage levels",
+    fill = "Model",
+    color = "Model"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+```
+
+
+
+## IS View
+
+
+```{r}
+winsize = 5 
+
+get_IS_vec <- function(mu_long, winsize, resolution) {
+  mu_long %>%
+    matrix_long_to_matrix2D_offdiag() %>%
+    calculate_insulation_score(
+      window_size = winsize,
+      bin_size = resolution
+    )
+}
+
+IS_long <- do.call(rbind, lapply(seq_len(nrow(all_models_unified)), function(i){
+  # i = 1
+  mu_mat <- all_models_unified$muS[[i]]   # [N_pairs x K]
+  K_row  <- ncol(mu_mat)
+
+  do.call(rbind, lapply(seq_len(K_row), function(k){
+    # k = 1
+    df_k <- get_IS_vec(mu_mat[, k], winsize, resolution)  # tibble/data.frame
+    df_k$cell     <- k
+    df_k$model    <- all_models_unified$model[i]
+    df_k$chr      <- all_models_unified$chr[i]
+    df_k$coverage <- all_models_unified$coverage[i]
+    df_k
+  }))
+
+}))
+```
+
+```{r}
+IS_long <- IS_long %>%
+  mutate(
+    model  = factor(model, levels = final_levels),
+    chr = as.numeric(chr),
+    coverage = factor(as.character(coverage), levels = lambda_list, ordered = TRUE),
+  )
+```
+
+
+```{r}
+IS_true <- bind_rows(lapply(chr_vec, function(chr_id) {
+  trueM <- true_by_chr[[as.character(chr_id)]]  # [N_pairs x K]
+  bind_rows(lapply(seq_len(K), function(cell_id) {
+    get_IS_vec(trueM[, cell_id], winsize, resolution) %>%
+      mutate(
+        cell = cell_id,
+        model = "Truth",
+        chr = chr_id
+      )
+
+  }))
+})) %>%
+  mutate(
+    chr = as.numeric(chr),
+    coverage = NA  # keep column for compatibility with other IS tables
+  )
+```
+
+### chr1 cell1 lambda0.5
+
+```{r, fig.width=15, fig.height=5, warning=F}
+cell_id <- 1
+chr_id <- 1
+coverage_id <- 0.5
+
+IS_all <- bind_rows(
+  IS_true %>% filter(cell == cell_id, chr == chr_id),
+  IS_long %>% filter(cell == cell_id, chr == chr_id, coverage == coverage_id)
+) %>%
+  select(bin_index, IS_prime, model)
+
+y_lim <- range(
+  IS_all$IS_prime,
+  finite = TRUE
+)
+
+method_colors <- c(
+  "HiCBZIP-GB(NB)" = "#0072B2",  # blue
+  "HiCBZIP-N(GS)"  = "#D55E00",  # orange
+  "HiCBZIP-N(M)"   = "#CC79A7",  # magenta
+  "HiCImpute"      = "#56B4E9",  # light blue
+  "scHiCluster"    = "#E69F00",   # gold
+  "Higashi"    = "purple"   # gold
+)
+
+base_colors <- c(
+  "Truth" = "#009E73",          # green
+  "Simulated (Raw)" = "grey65"
+)
+
+all_colors <- c(base_colors, method_colors)
+
+ggplot(
+  IS_all %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+for (method in final_levels[-1]) {
+
+  IS_plot <- IS_all %>%
+    filter(model %in% c("Truth", "Simulated (Raw)", method))
+
+p = ggplot(
+  IS_plot %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+  print(p)
+}
+```
+
+### chr8 cell1 lambda0.2
+
+```{r, fig.width=15, fig.height=5, warning=F}
+cell_id <- 1
+chr_id <- 8
+coverage_id <- 0.2
+
+IS_all <- bind_rows(
+  IS_true %>% filter(cell == cell_id, chr == chr_id),
+  IS_long %>% filter(cell == cell_id, chr == chr_id, coverage == coverage_id)
+) %>%
+  select(bin_index, IS_prime, model)
+
+y_lim <- range(
+  IS_all$IS_prime,
+  finite = TRUE
+)
+
+method_colors <- c(
+  "HiCBZIP-GB(NB)" = "#0072B2",  # blue
+  "HiCBZIP-N(GS)"  = "#D55E00",  # orange
+  "HiCBZIP-N(M)"   = "#CC79A7",  # magenta
+  "HiCImpute"      = "#56B4E9",  # light blue
+  "scHiCluster"    = "#E69F00",   # gold
+  "Higashi"    = "purple"   # gold
+)
+
+base_colors <- c(
+  "Truth" = "#009E73",          # green
+  "Simulated (Raw)" = "grey65"
+)
+
+all_colors <- c(base_colors, method_colors)
+
+ggplot(
+  IS_all %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  labs(
+    x = "Bin Index",
+    y = "Insulation Score",
+    title = "Insulation Score of Cell #1 on Chromosome 8 (lambda=0.2)"
+  )+
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank()
+  )
+
+for (method in final_levels[-1]) {
+
+  IS_plot <- IS_all %>%
+    filter(model %in% c("Truth", "Simulated (Raw)", method))
+
+p = ggplot(
+  IS_plot %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+  print(p)
+}
+```
+
+### chr1 cell1 lambda0.05
+
+```{r, fig.width=15, fig.height=5, warning=F}
+cell_id <- 1
+chr_id <- 1
+coverage_id <- 0.05
+
+IS_all <- bind_rows(
+  IS_true %>% filter(cell == cell_id, chr == chr_id),
+  IS_long %>% filter(cell == cell_id, chr == chr_id, coverage == coverage_id)
+) %>%
+  select(bin_index, IS_prime, model)
+
+y_lim <- range(
+  IS_all$IS_prime,
+  finite = TRUE
+)
+
+method_colors <- c(
+  "HiCBZIP-GB(NB)" = "#0072B2",  # blue
+  "HiCBZIP-N(GS)"  = "#D55E00",  # orange
+  "HiCBZIP-N(M)"   = "#CC79A7",  # magenta
+  "HiCImpute"      = "#56B4E9",  # light blue
+  "scHiCluster"    = "#E69F00",   # gold
+  "Higashi"    = "purple"   # gold
+)
+
+base_colors <- c(
+  "Truth" = "#009E73",          # green
+  "Simulated (Raw)" = "grey65"
+)
+
+all_colors <- c(base_colors, method_colors)
+
+ggplot(
+  IS_all %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+for (method in final_levels[-1]) {
+
+  IS_plot <- IS_all %>%
+    filter(model %in% c("Truth", "Simulated (Raw)", method))
+
+p = ggplot(
+  IS_plot %>%
+    mutate(
+      model = trimws(as.character(model)),
+      linetype = if_else(model == "Truth", "solid", "dashed")
+    ),
+  aes(x = bin_index, y = IS_prime, color = model, linetype = linetype)
+) + 
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = all_colors) +
+  scale_linetype_identity() +          # ✅ THIS fixes the dashing
+  coord_cartesian(ylim = y_lim) +
+  guides(linetype = "none") +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+  print(p)
+}
+```
+
+### SMSE of lambda
+
+```{r}
+winsize <- 5
+K <- 30
+
+mse_IS <- do.call(rbind, lapply(seq_len(nrow(all_models_unified)), function(i){
+
+  chr_i <- all_models_unified$chr[i]
+  cov_i <- all_models_unified$coverage[i]
+  mod_i <- all_models_unified$model[i]
+
+  mu_i   <- all_models_unified$muS[[i]]                 # [N_pairs x K]
+  trueM  <- true_by_chr[[as.character(chr_i)]]   # [N_pairs x K]
+
+  mse_mat <- get_IS_mse(trueM, mu_i, n_cell = K,
+                        win_size = winsize, resolution = resolution)
+
+  data.frame(
+    chr = chr_i,
+    coverage = cov_i,
+    cell = seq_len(K),
+    model = mod_i,
+    MSE = mse_mat[, "MSE"],
+    sMSE = mse_mat[, "sMSE"],
+    stringsAsFactors = FALSE
+  )
+}))
+
+# make coverage ordered like before (optional)
+mse_IS <- mse_IS %>%
+  mutate(
+    coverage = factor(as.character(coverage), levels = cov_levels, ordered = TRUE),
+    chr = as.numeric(chr),
+    model  = factor(model, levels = final_levels)
+  )
+mse_IS     <- mse_IS     %>% left_join(region_info %>% select(chr, facet_label), by = "chr")
+```
+
+### p_IS_MSE
+
+```{r, fig.width=15, fig.height=6}
+p_SMSE_IS = ggplot(mse_IS %>% filter(model != "Simulated (Raw)"), aes(x = coverage, y = sMSE, fill = model, color = model)) +
+  # geom_boxplot(
+  #   width = 0.5,
+  #   position = position_dodge(width = 0.6),
+  #   outlier.shape = 21, outlier.size = 0.7, outlier.stroke = 0.25,
+  #   linewidth = 0.3
+  # ) +
+  # geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  geom_boxplot(outliers = F, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE",
+    title = "SMSE of IS across Chromosomes"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_SMSE_IS
+```
+
+
+## Clustering
+
+### UMAP Example
+
+```{r}
+cell_type_label = true_by_chr$`1` %>% colnames() %>% substr(., 1, 10)
+table(all_models_unified$model)
+```
+
+```{r, fig.width=12}
+library(umap)
+library(mclust)
+## optional: ensure consistent model order
+model_levels <- final_levels
+plot_umap_chr1_by_coverage <- function(all_models_unified,
+                                       chr_id = 1,
+                                       n_neighbors = 10,
+                                       n_rep = 10) {
+
+  # subset to chosen chromosome
+  chr_dat <- all_models_unified %>%
+    filter(chr == chr_id)
+
+  # coverage levels in desired order
+  cov_levels <- levels(chr_dat$coverage)
+  if (is.null(cov_levels)) {
+    cov_levels <- sort(unique(chr_dat$coverage))
+  }
+
+  for (covg in cov_levels) {
+    dat_cov <- chr_dat %>%
+      filter(coverage == covg) %>%
+      mutate(
+        model = factor(model,
+                       levels = final_levels)
+      ) %>%
+      arrange(model)
+
+    # list of matrices for this coverage
+    list_muS_cov <- setNames(dat_cov$muS, as.character(dat_cov$model))
+
+    set.seed(12345)
+    umap_plots <- lapply(seq_along(list_muS_cov), function(i) {
+      mat <- list_muS_cov[[i]]        # N x K
+      model_name <- names(list_muS_cov)[i]
+
+      # 1) all-zero or constant case → placeholder panel
+      if (all(mat == 0) || stats::sd(as.vector(mat)) == 0) {
+        ggplot() +
+          geom_rect(aes(xmin = -10, xmax = 10, ymin = -10, ymax = 10),
+                    fill = NA, color = "grey70", linewidth = 0.6) +
+          annotate("text",
+                   x = 0, y = 0,
+                   label = "(all imputed values = 0;\nUMAP / ARI not computed)",
+                   size = 4) +
+          xlab("X1") + ylab("X2") +
+          labs(
+            title    = model_name,
+            subtitle = "ARI: NA"
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      } else {
+        # 2) normal case: run UMAP + k-means + ARI
+        umap_cfg <- umap.defaults
+        umap_cfg$n_neighbors   <- n_neighbors
+        umap_cfg$random_state  <- 123456
+
+        umap_res <- umap(t(mat), config = umap_cfg)
+        emb <- as.data.frame(umap_res$layout)
+        colnames(emb) <- c("X1", "X2")
+
+        km_res <- kmeans(emb, centers = 3, nstart = n_rep)
+
+        ari_val <- adjustedRandIndex(
+          km_res$cluster,
+          rep(1:3, each = n_rep)
+        )
+
+        emb_df <- data.frame(
+          X1      = emb$X1,
+          X2      = emb$X2,
+          Cluster = factor(km_res$cluster),
+          Type    = cell_type_label   # length 30
+        )
+
+        ggplot(emb_df, aes(x = X1, y = X2,
+                           color = Type, shape = Cluster)) +
+          geom_point(size = 1) +
+          labs(
+            title    = model_name,
+            subtitle = paste("ARI:", round(ari_val, 3))
+          ) +
+          theme_minimal() +
+          theme(legend.position = "none")
+      }
+    })
+
+    # 2 x 3 grid for this coverage
+    do.call(
+      grid.arrange,
+      c(umap_plots,
+        ncol = 4,
+        top  = paste0("chr", chr_id, ", coverage λ = ", covg, " (UMAP)"))
+    )
+  }
+}
+```
+
+```{r, fig.width=15, fig.height=6}
+plot_umap_chr1_by_coverage(all_models_unified, chr_id = 4, n_neighbors = n_rep,n_rep = n_rep)
+```
+
+### Get ARI
+
+
+
+```{r}
+set.seed(12345)
+library(umap)
+library(mclust)
+
+ari_value <- lapply(1:length(all_models_unified$muS), function(i) {
+  umap_results <- umap(t(all_models_unified$muS[[i]]), n_neighbors = n_rep, random_state=12345)
+  embedding <- umap_results$layout
+  kmeans_results <- kmeans(embedding, centers = 3, nstart = n_rep)
+  embedding_df <- data.frame(embedding, Cluster = factor(kmeans_results$cluster), Type = cell_type_label)
+  ari <- adjustedRandIndex(kmeans_results$cluster, rep(1:3, each = n_rep))
+  return(ari)
+})
+```
+
+#### p_ari
+
+```{r, fig.width=15, fig.height=6}
+ari_df = all_models_unified %>% select(chr, coverage, model) %>% mutate(ARI = unlist(ari_value)) %>% 
+  left_join(region_info %>% select(chr, facet_label), by = "chr")
+facet_var <- "facet_label"
+
+p_ari= ggplot(ari_df, aes(x = coverage, y = ARI, group = model, color = model)) +
+  geom_line() +
+  # geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "ARI (UMAP+k-means)",
+    title = "ARI Values in Clustering (UMAP+K-Means) across Chromosomes and coverage levels"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_ari
+
+
+p_ari2= ggplot(ari_df, aes(x = coverage, y = ARI, fill = model)) +
+  # geom_line() +
+  geom_col(width = 0.3, position = position_dodge(width = 0.5)) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "ARI (UMAP+k-means)",
+    title = "ARI Values in Clustering (UMAP+K-Means) across Chromosomes and coverage levels"
+  ) +
+  # scale_y_log10() +
+  # geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_ari2
+
+
+p_ari3 = ggplot(ari_df, aes(x = coverage, y = ARI, fill = model, color = model)) +
+  # geom_line() +
+  geom_boxplot(outlier.size = 1, width = 0.3, position = position_dodge(width = 0.6), linewidth = 0.3) +
+  # facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "ARI (UMAP+k-means)",
+    title = "ARI Values in Clustering (UMAP+K-Means) across Chromosomes and coverage levels"
+  ) +
+  # scale_y_log10() +
+  # geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_ari3
+```
+
+
+## Save
+
+```{r}
+save(all_models_unified, muS_unified_MSE,
+     region_info, sim_unified, true_by_chr,
+     chr_vec, cov_levels, final_levels, N, K, n_rep,
+     lambda_list, resolution, winsize, 
+      MSE_row_df, p_MSE_row,MSE_overall_df,p_MSE_overall,
+      scc_all, p_scc,IS_df,p_IS,
+      IS_long,IS_true,mse_IS,p_SMSE_IS,
+     file = path_here("results", "simulation", "manuscript_summaries", "muS_combined_plot_260209.RData"))
+```
+
+## Plotting for ENAR (order by chr)
+
+```{r, fig.width=15, fig.height=6}
+MSE_row_df = MSE_row_df %>%
+  mutate(facet_label = factor(facet_label, levels = unique(MSE_row_df$facet_label)))
+p_MSE_row = ggplot(MSE_row_df, aes(x = coverage, y = SMSE, fill = model, color = model)) +
+  geom_boxplot(outliers = F, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE (per pair)",
+    title = "Row-wise SMSE of Estimated Interaction Intensity Across Chromosomes and Coverage Levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_MSE_row
+```
+
+```{r, fig.width=15, fig.height=6}
+MSE_overall_df = MSE_overall_df %>%
+  mutate(facet_label = factor(facet_label, levels = unique(MSE_overall_df$facet_label)))
+p_MSE_overall = ggplot(MSE_overall_df, aes(x = coverage, y = SMSE_overall, fill = model)) +
+  geom_col(width = 0.4, position = position_dodge(width = 0.5)) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE (overall)",
+    title = "Overall SMSE of Estimated Interaction Intensity Across Chromosomes and Coverage Levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_MSE_overall
+```
+
+```{r, fig.width=15, fig.height=6}
+scc_all = scc_all %>%
+  mutate(facet_label = factor(facet_label, levels = unique(scc_all$facet_label)))
+p_scc = ggplot(scc_all %>% filter(method != "Simulated (Raw)"), aes(x = coverage, y = SCC, fill = method, color = method)) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.2) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    title = "SCC (Stratum-Adjusted Correlation Coefficient) Across Chromosomes and Coverage Levels",
+    x = "Coverage (λ)",
+    y = "SCC"
+  ) +
+  # scale_fill_brewer(palette = "Set2") +
+  # scale_color_brewer(palette = "Set2") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_scc
+```
+
+```{r, fig.width=15, fig.height=6}
+IS_df = IS_df %>%
+  mutate(facet_label = factor(facet_label, levels = unique(IS_df$facet_label)))
+p_IS=ggplot(IS_df %>% filter(model != "Simulated (Raw)"), aes(x = coverage, y = IS, fill = model, color = model)) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.1) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    x = expression(lambda),
+    y = "Pearson Correlation (IS)",
+    title = "Pearson correlation of Insulation Scores Across Chromosomes and Coverage Levels",
+    fill = "Model",
+    color = "Model"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_IS
+```
+
+```{r, fig.width=15, fig.height=6}
+mse_IS = mse_IS %>%
+  mutate(facet_label = factor(facet_label, levels = unique(mse_IS$facet_label)))
+p_SMSE_IS = ggplot(mse_IS %>% filter(model != "Simulated (Raw)"), aes(x = coverage, y = sMSE, fill = model, color = model)) +
+  geom_boxplot(outliers = F, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE",
+    title = "SMSE of Insulation Scores Across Chromosomes and Coverage Levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "grey95", color = NA)
+  )
+p_SMSE_IS
+```

@@ -1,0 +1,634 @@
+---
+title: "display_sim3_ten_chr_fasthigashi_rwr_manuscript_260703"
+author: "Xuan Chen"
+date: "2026-07-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = TRUE)
+rm(list = ls())
+library(tidyverse)
+library(magrittr)
+library(ggplot2)
+source(file.path("..", "_common", "project_paths.R"))
+knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
+```
+
+```{r}
+source_hicbzip_core()
+source(path_here("simulations", "manuscript_figure_helpers.R"))
+```
+
+## Load Saved Comparison Output
+
+```{r}
+load(path_here("data", "processed", "simulation", "muS_combined_plot_both_fasthigashi_260613.RData"))
+```
+
+## Keep Only the RWR Fast-Higashi Version
+
+```{r}
+all_models_unified$facet_label = ari_df$facet_label
+```
+
+
+```{r}
+all_models_display <- all_models_unified %>%
+  filter(model != "Fast-Higashi") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+MSE_row_display <- MSE_row_df %>%
+  filter(model != "Fast-Higashi(scaled)") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+MSE_overall_display <- MSE_overall_df %>%
+  filter(model != "Fast-Higashi(scaled)") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+scc_display <- scc_all %>%
+  filter(method != "Fast-Higashi") %>%
+  mutate(method_label = normalize_manuscript_method_label(method))
+
+IS_df_display <- IS_df %>%
+  filter(model != "Fast-Higashi") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+IS_long_display <- IS_long %>%
+  filter(model != "Fast-Higashi") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+mse_IS_display <- mse_IS %>%
+  filter(model != "Fast-Higashi") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+ari_df_display <- ari_df %>%
+  filter(model != "Fast-Higashi") %>%
+  mutate(model_label = normalize_manuscript_method_label(model))
+
+final_levels_display <- c(
+  "Truth",
+  "Simulated (Raw)",
+  "HiCBZIP-GB(NB)",
+  "HiCBZIP-N(GS)",
+  "HiCBZIP-N(M)",
+  "HiCImpute",
+  "scHiCluster",
+  "Higashi",
+  "Fast-Higashi"
+)
+
+all_models_display <- all_models_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+MSE_row_display <- MSE_row_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+MSE_overall_display <- MSE_overall_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+scc_display <- scc_display %>%
+  mutate(method_label = factor(method_label, levels = final_levels_display))
+
+IS_df_display <- IS_df_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+IS_long_display <- IS_long_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+mse_IS_display <- mse_IS_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+ari_df_display <- ari_df_display %>%
+  mutate(model_label = factor(model_label, levels = final_levels_display))
+
+facet_var <- "facet_label"
+fig_dir <- path_here("results", "simulation", "figures")
+heatmap_dir <- file.path(fig_dir, "heatmaps")
+final_levels_display
+```
+
+## Example Heatmaps
+
+```{r}
+chr_id_heatmap <- 1
+heatmap_rows_base <- all_models_display %>%
+  filter(chr == chr_id_heatmap, coverage == "0.4")
+
+stopifnot(nrow(heatmap_rows_base) > 0)
+dir.create(heatmap_dir, recursive = TRUE, showWarnings = FALSE)
+
+heatmap_cols <- c(1, 11, 21, 2, 12, 22)
+heatmap_labels <- c(
+  "GSM3749700 r1",
+  "GSM3750251 r1",
+  "GSM3751478 r1",
+  "GSM3749700 r2",
+  "GSM3750251 r2",
+  "GSM3751478 r2"
+)
+
+heatmap_region_label <- unique(as.character(heatmap_rows_base$facet_label))
+stopifnot(length(heatmap_region_label) == 1)
+heatmap_cov_value <- unique(as.numeric(as.character(heatmap_rows_base$coverage)))
+stopifnot(length(heatmap_cov_value) == 1)
+
+truth_heatmap_row <- heatmap_rows_base[1, ]
+truth_heatmap_row$model <- "Truth"
+truth_heatmap_row$model_label <- "Truth"
+truth_heatmap_row$muS <- list(true_by_chr[[as.character(chr_id_heatmap)]])
+
+heatmap_rows <- dplyr::bind_rows(
+  truth_heatmap_row,
+  heatmap_rows_base
+)
+
+truth_mean_heatmap <- mean(
+  as.numeric(true_by_chr[[as.character(chr_id_heatmap)]]),
+  na.rm = TRUE
+)
+
+heatmap_maxi <- setNames(
+  sapply(seq_len(nrow(heatmap_rows)), function(i) {
+    model_i <- as.character(heatmap_rows$model_label[[i]])
+    x <- as.numeric(heatmap_rows$muS[[i]])
+
+    if (model_i %in% c("Truth", "Simulated (Raw)", "HiCBZIP-GB(NB)", "HiCBZIP-N(GS)", "HiCBZIP-N(M)")) {
+      10 * truth_mean_heatmap
+    } else {
+      10 * mean(x, na.rm = TRUE)
+    }
+  }),
+  as.character(heatmap_rows$model_label)
+)
+
+heatmap_maxi
+```
+
+```{r}
+stopifnot(nrow(heatmap_rows) > 0)
+
+plot_labeled_heatmaps <- function(mu_mat, model_i, maxi_i) {
+  panel_title_size <- 12
+  axis_title_size <- 8
+  axis_text_size <- 8
+  top_title_size <- 16
+
+  plots <- lapply(seq_along(heatmap_cols), function(j) {
+    x <- matrix_long_to_matrix2D_offdiag(mu_mat[, heatmap_cols[j]])
+    mat_to_heatmap(x, maxi_i) +
+      theme_minimal() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(size = panel_title_size, hjust = 0.5),
+        axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+      ) +
+      scale_y_continuous(breaks = seq(0, nrow(x), by = 20)) +
+      scale_x_continuous(breaks = seq(0, nrow(x), by = 20)) +
+      ggtitle(heatmap_labels[j])
+  })
+
+  gridExtra::grid.arrange(
+    grobs = plots,
+    ncol = 3,
+    top = grid::textGrob(
+      label = bquote(.(model_i) * ": " * .(heatmap_region_label) * ", " * lambda == .(heatmap_cov_value)),
+      gp = grid::gpar(fontsize = top_title_size, fontface = "bold")
+    )
+  )
+}
+
+for (i in seq_len(nrow(heatmap_rows))) {
+  model_i <- as.character(heatmap_rows$model_label[[i]])
+  maxi_i <- unname(heatmap_maxi[model_i])
+  plot_labeled_heatmaps(heatmap_rows$muS[[i]], model_i, maxi_i)
+}
+```
+
+```{r}
+for (i in seq_len(nrow(heatmap_rows))) {
+  model_i <- as.character(heatmap_rows$model_label[[i]])
+  maxi_i <- unname(heatmap_maxi[model_i])
+  safe_model <- gsub("[^A-Za-z0-9]+", "_", model_i)
+  png(
+    filename = file.path(heatmap_dir, paste0("heatmap_", safe_model, "_chr1_cov0p4.png")),
+    width = 1800,
+    height = 1200,
+    res = 200
+  )
+  plot_labeled_heatmaps(heatmap_rows$muS[[i]], model_i, maxi_i)
+  dev.off()
+}
+```
+
+## First-Cell Heatmap Comparison Across Methods
+
+```{r, fig.width=12, fig.height=12}
+first_cell_col <- 1
+first_cell_label <- "GSM3749700 r1"
+
+plot_first_cell_heatmaps <- function(heatmap_rows, heatmap_maxi) {
+  panel_title_size <- 12
+  axis_title_size <- 8
+  axis_text_size <- 8
+  top_title_size <- 16
+
+  plots <- lapply(seq_len(nrow(heatmap_rows)), function(i) {
+    model_i <- as.character(heatmap_rows$model_label[[i]])
+    maxi_i <- unname(heatmap_maxi[model_i])
+    x <- matrix_long_to_matrix2D_offdiag(heatmap_rows$muS[[i]][, first_cell_col])
+
+    mat_to_heatmap(x, maxi_i) +
+      theme_minimal() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(size = panel_title_size, hjust = 0.5),
+        axis.title = element_text(size = axis_title_size),
+        axis.text = element_text(size = axis_text_size),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+      ) +
+      scale_y_continuous(breaks = seq(0, nrow(x), by = 20)) +
+      scale_x_continuous(breaks = seq(0, nrow(x), by = 20)) +
+      ggtitle(model_i)
+  })
+
+  gridExtra::grid.arrange(
+    grobs = plots,
+    ncol = 3,
+    top = grid::textGrob(
+      label = bquote("Heatmap Comparison (" * .(first_cell_label) * "): " * .(heatmap_region_label) * ", " * lambda == .(heatmap_cov_value)),
+      gp = grid::gpar(fontsize = top_title_size, fontface = "bold")
+    )
+  )
+}
+
+plot_first_cell_heatmaps(heatmap_rows, heatmap_maxi)
+```
+
+```{r}
+png(
+  filename = file.path(heatmap_dir, "heatmap_first_cell_all_methods_chr1_cov0p4.png"),
+  width = 1800,
+  height = 1800,
+  res = 220
+)
+plot_first_cell_heatmaps(heatmap_rows, heatmap_maxi)
+dev.off()
+```
+
+## MSE
+
+```{r, fig.width=15, fig.height=6}
+p_MSE_row_manuscript <- ggplot(
+  MSE_row_display %>% filter(model_label != "Simulated (Raw)"),
+  aes(x = coverage, y = SMSE, fill = model_label, color = model_label)
+) +
+  geom_boxplot(outliers = FALSE, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE (per pair)",
+    title = "Row-wise SMSE of Estimated Interaction Intensity Across Chromosomes and Coverage Levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  manuscript_theme()
+
+p_MSE_row_manuscript <- apply_manuscript_colors(p_MSE_row_manuscript)
+p_MSE_row_manuscript
+```
+
+```{r}
+save_manuscript_plot(
+  p_MSE_row_manuscript,
+  "sim3_SMSE_row",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 6
+)
+```
+
+```{r, fig.width=15, fig.height=6}
+p_MSE_overall_manuscript <- ggplot(
+  MSE_overall_display %>% filter(model_label != "Simulated (Raw)"),
+  aes(x = coverage, y = SMSE_overall, fill = model_label, color = model_label)
+) +
+  geom_col(width = 0.35, position = position_dodge(width = 0.55), linewidth = 0.2) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Overall Standardized MSE",
+    title = "Overall SMSE of Estimated Interaction Intensity Across Chromosomes and Coverage Levels"
+  ) +
+  scale_y_log10() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  manuscript_theme()
+
+p_MSE_overall_manuscript <- apply_manuscript_colors(p_MSE_overall_manuscript)
+p_MSE_overall_manuscript
+```
+
+```{r}
+save_manuscript_plot(
+  p_MSE_overall_manuscript,
+  "sim3_SMSE_all",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 6
+)
+```
+
+## SCC
+
+```{r, fig.width=15, fig.height=6}
+p_scc_manuscript <- ggplot(
+  scc_display %>% filter(method_label != "Simulated (Raw)"),
+  aes(x = coverage, y = SCC, fill = method_label, color = method_label)
+) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.2) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    title = "SCC (Stratum-Adjusted Correlation Coefficient) Across Chromosomes and Coverage Levels",
+    x = "Coverage (lambda)",
+    y = "SCC"
+  ) +
+  manuscript_theme()
+
+p_scc_manuscript <- apply_manuscript_colors(p_scc_manuscript)
+p_scc_manuscript
+```
+
+```{r}
+save_manuscript_plot(
+  p_scc_manuscript,
+  "sim3_scc",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 6
+)
+```
+
+## IS
+
+```{r, fig.width=15, fig.height=6}
+p_IS_manuscript <- ggplot(
+  IS_df_display %>% filter(model_label != "Simulated (Raw)"),
+  aes(x = coverage, y = IS, fill = model_label, color = model_label)
+) +
+  geom_boxplot(outlier.size = 0.2, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.1) +
+  facet_wrap(~ facet_label, scales = "fixed", ncol = 5) +
+  labs(
+    x = expression(lambda),
+    y = "Pearson Correlation (IS)",
+    title = "Pearson correlation of Insulation Scores Across Chromosomes and Coverage Levels"
+  ) +
+  manuscript_theme()
+
+p_IS_manuscript <- apply_manuscript_colors(p_IS_manuscript)
+p_IS_manuscript
+```
+
+```{r}
+save_manuscript_plot(
+  p_IS_manuscript,
+  "sim3_is_boxplot",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 6
+)
+```
+
+## IS View Examples
+
+```{r}
+plot_is_example_manuscript <- function(chr_id, coverage_id, cell_id = 1) {
+  IS_all <- bind_rows(
+    IS_true %>% filter(cell == cell_id, chr == chr_id) %>% mutate(model_label = "Truth"),
+    IS_long_display %>% filter(cell == cell_id, chr == chr_id, coverage == coverage_id)
+  ) %>%
+    select(bin_index, IS_prime, model_label)
+
+  y_lim <- range(IS_all$IS_prime, finite = TRUE)
+
+  ggplot(
+    IS_all %>%
+      mutate(
+        model_label = trimws(as.character(model_label)),
+        linetype = if_else(model_label %in% c("Simulated (Raw)", "Truth") , "solid", "dashed")
+      ),
+    aes(x = bin_index, y = IS_prime, color = model_label, linetype = linetype)
+  ) +
+    geom_line(linewidth = 0.8) +
+    scale_color_manual(values = manuscript_all_colors, drop = FALSE) +
+    scale_linetype_identity() +
+    coord_cartesian(ylim = y_lim) +
+    guides(linetype = "none") +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "top",
+      legend.title = element_blank()
+    )
+}
+```
+
+```{r, fig.width=15, fig.height=5}
+p_is_example_chr1_cov05 <- plot_is_example_manuscript(chr_id = 1, coverage_id = 0.5, cell_id = 1)
+p_is_example_chr1_cov05
+```
+
+```{r}
+save_manuscript_plot(
+  p_is_example_chr1_cov05,
+  "sim3_is_example_chr1_cov0p5_cell1",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 5
+)
+```
+
+```{r, fig.width=15, fig.height=5}
+p_is_example_chr8_cov02 <- plot_is_example_manuscript(chr_id = 8, coverage_id = 0.2, cell_id = 1)
+p_is_example_chr8_cov02
+```
+
+```{r}
+save_manuscript_plot(
+  p_is_example_chr8_cov02,
+  "sim3_is_example_chr8_cov0p2_cell1",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 5
+)
+```
+
+```{r, fig.width=15, fig.height=5}
+p_is_example_chr1_cov005 <- plot_is_example_manuscript(chr_id = 1, coverage_id = 0.05, cell_id = 1)
+p_is_example_chr1_cov005
+```
+
+```{r}
+save_manuscript_plot(
+  p_is_example_chr1_cov005,
+  "sim3_is_example_chr1_cov0p05_cell1",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 5
+)
+```
+
+
+```{r, fig.width=15, fig.height=5}
+p_is_example_chr17_cov02 <- plot_is_example_manuscript(chr_id = 17, coverage_id = 0.2, cell_id = 1)
+p_is_example_chr17_cov02
+```
+```{r}
+save_manuscript_plot(
+  p_is_example_chr17_cov02,
+  "sim3_is_example_chr17_cov0p2_cell1",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 5
+)
+```
+
+## SMSE of IS
+
+```{r, fig.width=15, fig.height=6}
+p_SMSE_IS_manuscript <- ggplot(
+  mse_IS_display %>% filter(model_label != "Simulated (Raw)"),
+  aes(x = coverage, y = sMSE, fill = model_label, color = model_label)
+) +
+  geom_boxplot(outliers = FALSE, width = 0.4, position = position_dodge(width = 0.7), linewidth = 0.3) +
+  facet_wrap(as.formula(paste("~", facet_var)), ncol = 5, scales = "fixed") +
+  labs(
+    x = expression(lambda),
+    y = "Standardized MSE",
+    title = "SMSE of IS across Chromosomes"
+  ) +
+  scale_y_log10() +
+  coord_cartesian(ylim = c(0.1, 100)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  manuscript_theme()
+
+p_SMSE_IS_manuscript <- apply_manuscript_colors(p_SMSE_IS_manuscript)
+p_SMSE_IS_manuscript
+```
+
+```{r}
+save_manuscript_plot(
+  p_SMSE_IS_manuscript,
+  "sim3_is_smse",
+  fig_dir = fig_dir,
+  width = 15,
+  height = 6
+)
+```
+
+## ARI
+
+```{r, fig.width=15, fig.height=6}
+p_ari3_manuscript <- ggplot(
+  ari_df_display,
+  aes(x = coverage, y = ARI, fill = model_label, color = model_label)
+) +
+  geom_boxplot(outlier.size = 1, width = 0.3, position = position_dodge(width = 0.6), linewidth = 0.3) +
+  labs(
+    x = expression(lambda),
+    y = "ARI (UMAP+k-means)",
+    title = "ARI Values in Clustering (UMAP+K-Means) across Chromosomes and coverage levels"
+  ) +
+  manuscript_theme()
+
+p_ari3_manuscript <- apply_manuscript_colors(p_ari3_manuscript)
+p_ari3_manuscript
+```
+
+
+```{r}
+library(tidyverse)
+
+heat_models <- final_levels_display[final_levels_display != "Truth"]
+
+n_chr_expected <- all_models_display %>%
+  distinct(chr) %>%
+  nrow()
+
+availability_tbl <- all_models_display %>%
+  filter(model_label %in% heat_models) %>%
+  distinct(model_label, chr, coverage) %>%
+  count(model_label, coverage, name = "n_available")
+
+ari_summary_tbl <- ari_df_display %>%
+  filter(model_label %in% heat_models) %>%
+  group_by(model_label, coverage) %>%
+  summarise(
+    n_ari = n(),
+    n_nonmiss_ari = sum(!is.na(ARI)),
+    mean_ari_raw = mean(ARI, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+## methods for which zero should be treated as missing/failure
+zero_means_missing_methods <- c("HiCImpute")
+
+ari_heat <- expand_grid(
+  model_label = factor(heat_models, levels = heat_models),
+  coverage = levels(ari_df_display$coverage)
+) %>%
+  mutate(coverage = factor(coverage, levels = levels(ari_df_display$coverage), ordered = TRUE)) %>%
+  left_join(availability_tbl, by = c("model_label", "coverage")) %>%
+  left_join(ari_summary_tbl, by = c("model_label", "coverage")) %>%
+  mutate(
+    n_available = replace_na(n_available, 0L),
+    complete_run = n_available == n_chr_expected,
+    mean_ari_clipped = if_else(is.na(mean_ari_raw), NA_real_, pmax(mean_ari_raw, 0)),
+    zero_as_missing = model_label %in% zero_means_missing_methods & !is.na(mean_ari_clipped) & mean_ari_clipped <= 0,
+    missing_for_plot = !complete_run | is.na(mean_ari_clipped) | zero_as_missing,
+    mean_ari_plot = if_else(missing_for_plot, NA_real_, mean_ari_clipped)
+  )
+
+p_ari_heat <- ggplot(ari_heat, aes(x = coverage, y = model_label, fill = mean_ari_plot)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  scale_fill_gradientn(
+    colours = c("#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"),
+    limits = c(0, 1),
+    na.value = "grey60",
+    name = "Mean ARI"
+  ) +
+  manuscript_theme() +
+  labs(
+    x = expression(lambda),
+    y = NULL,
+    title = "Mean Clustering Accuracy Across Coverage Levels"
+  )
+
+p_ari_heat
+```
+
+```{r}
+save_manuscript_plot(
+  p_ari_heat,
+  "sim3_ari_heatmap",
+  fig_dir = fig_dir,
+  width = 8,
+  height = 6
+)
+```
+
+
+## Save Display Objects
+
+<!-- # ```{r} -->
+<!-- # save( -->
+<!-- #   all_models_display, -->
+<!-- #   MSE_row_display, MSE_overall_display, scc_display, -->
+<!-- #   IS_df_display, IS_long_display, mse_IS_display, ari_df_display, -->
+<!-- #   p_MSE_row_manuscript, p_MSE_overall_manuscript, p_scc_manuscript, -->
+<!-- #   p_IS_manuscript, p_SMSE_IS_manuscript, p_ari3_manuscript, -->
+<!-- #   file = "Output/output_260612_sim3_fast_Higashi_rwr/display_sim3_ten_chr_fasthigashi_rwr_manuscript_260703.RData" -->
+<!-- # ) -->
+<!-- # ``` -->
