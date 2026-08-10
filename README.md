@@ -1,31 +1,30 @@
-# HiCBZIP manuscript code and data
+# HiCBZIP clean code draft
 
-This repository contains code, documentation, and shareable data files for the HiCBZIP manuscript.
+This folder is a public-release draft for the HiCBZIP manuscript repository. It is organized around the manuscript workflow:
 
-## Repository layout
+1. Core HiCBZIP method code.
+2. Simulation study.
+3. Real-data study 1: downsampled NPC chrX.
+4. Real-data study 2: SCORE mouse oocyte-to-zygote benchmark.
 
-- `code/`: analysis scripts and figure/table generation code.
-- `data/`: public or shareable data needed to reproduce the analyses.
-- `results/`: selected reproducible outputs, summary tables, and figures.
-- `docs/`: additional notes for reproducing or interpreting the analysis.
-- `environment/`: package lists and software environment files.
+The original working code in `../code/` is intentionally left untouched.
 
-## Reproducibility
+## Main entry points
 
-Add the exact commands needed to reproduce each major result here. A good pattern is:
+- `WORKFLOW.md`: ordered description of all manuscript steps.
+- `HiCBZIP/`: core HiCBZIP implementation and shared analysis helpers.
+- `simulations/01_run_HiCBZIP_GB_NB_simulation.R`: simulation HiCBZIP-GB/GB(NB) runner.
+- `simulations/02_prepare_simulation_manuscript_summaries.R`: simulation manuscript summary workflow.
+- `real_data_study_1/01_make_NPC_chrX_processed_input.R`: NPC chrX processed input builder.
+- `real_data_study_1/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`: NPC chrX HiCBZIP-GB/GB(NB) runner.
+- `real_data_study_1/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`: NPC chrX HiCBZIP-N(M) runner.
+- `real_data_study_1/04_summarize_NPC_chrX_manuscript_metrics.R`: NPC chrX manuscript summary workflow.
+- `real_data_study_2/01_build_SCORE_HiCBZIP_inputs.R`: SCORE Raw/HiCBZIP `.scool` builder.
+- `real_data_study_2/02_run_SCORE_embeddings.R`: SCORE embedding runs.
+- `real_data_study_2/03_summarize_SCORE_manuscript_metrics.R`: SCORE manuscript metric summary.
 
-1. Prepare or download data.
-2. Run preprocessing scripts.
-3. Run analysis scripts.
-4. Generate figures and tables.
+## Data policy
 
-## Data availability
+Generated figure files are not intended to be committed. Small processed examples can live in `data/`; large processed inputs and result folders should be archived externally and linked from the manuscript and release notes.
 
-Public, non-sensitive data required to reproduce the analysis should be placed in `data/` or linked from `data/README.md`.
-
-Large files or restricted datasets should be stored in an appropriate external repository instead of GitHub, with access instructions documented in `data/README.md`.
-
-## Code availability
-
-All analysis code required for the manuscript should be placed in `code/`. Include enough comments and instructions so another researcher can run the analysis from a clean checkout.
-
+See `data/README.md` and `../missing_inputs.md` before copying this folder into the public GitHub repository.

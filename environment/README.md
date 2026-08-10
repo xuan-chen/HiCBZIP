@@ -1,10 +1,10 @@
-# Environment README
+# Environment notes
 
-Document the software environment needed to reproduce the manuscript analyses.
+Recommended release contents:
 
-Recommended files to add:
+- R version and `sessionInfo()` output.
+- Package list for `tidyverse`, `cmdstanr`, `rstan`, `rhdf5`/`hdf5r`, `Matrix`, `jsonlite`, `patchwork`, `reticulate`, and SCORE dependencies.
+- CmdStan version used for HiCBZIP-N(M).
+- SCORE version and command-line environment.
 
-- `requirements.txt` for Python packages
-- `environment.yml` for Conda environments
-- `renv.lock` or `sessionInfo.txt` for R analyses
-
+External benchmark method versions should be documented in `benchmarks/README.md`.
