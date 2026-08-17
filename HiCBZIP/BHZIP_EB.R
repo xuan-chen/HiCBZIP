@@ -242,12 +242,23 @@ get_EBE_Matched_N_cmd = function(Y, c_plus_d = 10, lambda = 1, fix_negative_w = 
 }
 
 
-# infer n (number of bins along one axis) from N_pairs = n*(n-1)/2
-infer_n_from_long <- function(N_pairs) {
-  n <- (-1 + sqrt(1 + 8 * N_pairs)) / 2
-  n_int <- as.integer(round(n))
-  if (n_int * (n_int + 1) / 2 != N_pairs)
-    stop("N_pairs does not match n(n+1)/2; got N_pairs=", N_pairs, ", inferred n=", n_int)
+# infer n (number of bins along one axis) from a triangular long-vector length
+infer_n_from_long <- function(N_pairs, include_diag = TRUE) {
+  if (include_diag) {
+    n <- (-1 + sqrt(1 + 8 * N_pairs)) / 2
+    n_int <- as.integer(round(n))
+    if (n_int * (n_int + 1) / 2 != N_pairs) {
+      stop("N_pairs does not match n(n+1)/2; got N_pairs=", N_pairs,
+           ", inferred n=", n_int)
+    }
+  } else {
+    n <- (1 + sqrt(1 + 8 * N_pairs)) / 2
+    n_int <- as.integer(round(n))
+    if (n_int * (n_int - 1) / 2 != N_pairs) {
+      stop("N_pairs does not match n(n-1)/2; got N_pairs=", N_pairs,
+           ", inferred n=", n_int)
+    }
+  }
   n_int
 }
 
@@ -281,7 +292,7 @@ run_BZIP_GB_NB <- function(sim_y,
                            include_diag = TRUE,
                            return_hyper = FALSE) {
   N <- nrow(sim_y); K <- ncol(sim_y)
-  n_bins <- infer_n_from_long(N)
+  n_bins <- infer_n_from_long(N, include_diag = include_diag)
   neigh  <- get_neighbor_id(n_bins, r = r, include_diag = include_diag)
   
   muS <- matrix(0, nrow = N, ncol = K)
@@ -371,4 +382,195 @@ run_BZIP_GB_NB_list <- function(sim_y_list, coverage_levels, r = 1, threshold = 
     out[[i]] <- muS_i
   }
   out
+}
+
+
+gaussian_kernel <- function(size, sigma) {
+  center <- (size - 1) / 2
+  x <- -center:center
+  kernel <- exp(-(x^2) / (2 * sigma^2))
+  kernel <- kernel %o% kernel
+  kernel / sum(kernel)
+}
+
+convolve2d <- function(x, kernel) {
+  pad_size <- floor(nrow(kernel) / 2)
+  padded <- matrix(0, nrow(x) + 2 * pad_size, ncol(x) + 2 * pad_size)
+  padded[
+    (pad_size + 1):(nrow(padded) - pad_size),
+    (pad_size + 1):(ncol(padded) - pad_size)
+  ] <- x
+  out <- matrix(0, nrow(x), ncol(x))
+  for (i in seq_len(nrow(out))) {
+    for (j in seq_len(ncol(out))) {
+      out[i, j] <- sum(padded[i:(i + 2 * pad_size), j:(j + 2 * pad_size)] * kernel)
+    }
+  }
+  out
+}
+
+get_EBE_Matched_N_prior <- function(Y, c_plus_d = 10, lambda = 1, fix_negative_w = TRUE) {
+  ebe <- get_EBE_ZNB_Gamma_Beta(Y, c_plus_d = c_plus_d, lambda = lambda, fix_negative_w = fix_negative_w)
+
+  a_hat <- max(as.numeric(ebe$a), 1e-6)
+  b_hat <- max(as.numeric(ebe$b), 1e-6)
+  c_hat <- max(as.numeric(ebe$c), 0)
+  d_hat <- max(as.numeric(ebe$d), 0)
+
+  a_norm <- log(a_hat / b_hat)
+  sigma_mu <- sqrt(1 / a_hat)
+  b_norm <- ifelse(c_hat == 0, -1e4, ifelse(d_hat == 0, 1e4, log(c_hat / d_hat)))
+  sigma_pi <- ifelse(
+    c_hat == 0 | d_hat == 0,
+    1e-4,
+    sqrt((c_hat + d_hat)^2 / (c_hat * d_hat * (c_hat + d_hat + 1)))
+  )
+
+  if (!is.finite(a_norm)) a_norm <- log(mean(Y) / lambda + 1e-3)
+  if (!is.finite(sigma_mu) || sigma_mu <= 0) sigma_mu <- 1
+  if (!is.finite(b_norm)) b_norm <- 0
+  if (!is.finite(sigma_pi) || sigma_pi <= 0) sigma_pi <- 1
+
+  list(a_norm = a_norm, sigma_mu = sigma_mu, b_norm = b_norm, sigma_pi = sigma_pi)
+}
+
+run_cmdstan_sample <- function(mod, sample_args, silent_stan = FALSE) {
+  if (!isTRUE(silent_stan)) {
+    return(do.call(mod$sample, sample_args))
+  }
+
+  sample_args$refresh <- 0
+  sample_args$show_messages <- FALSE
+  sample_args$show_exceptions <- FALSE
+
+  tryCatch(
+    suppressWarnings(suppressMessages(do.call(mod$sample, sample_args))),
+    error = function(e) {
+      if (!grepl("unused argument|unused arguments", conditionMessage(e))) {
+        stop(e)
+      }
+      sample_args$show_messages <- NULL
+      sample_args$show_exceptions <- NULL
+      suppressWarnings(suppressMessages(do.call(mod$sample, sample_args)))
+    }
+  )
+}
+
+run_HiCBZIP_NGS <- function(sim_y,
+                            coverage,
+                            stan_file,
+                            chains = 2,
+                            parallel_chains = 2,
+                            iter_warmup = 100,
+                            iter_sampling = 100,
+                            include_diag = TRUE,
+                            output_dir = NULL,
+                            seed = 12345,
+                            silent_stan = FALSE) {
+  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+    stop("cmdstanr is required for HiCBZIP-N(GS).", call. = FALSE)
+  }
+  if (!exists("matrix_long_to_matrix2D", mode = "function") ||
+      !exists("matrix2D_to_matrix_long", mode = "function")) {
+    stop("matrix conversion helpers are required. Source analysis_helpers.R before running HiCBZIP-N(GS).", call. = FALSE)
+  }
+
+  N <- nrow(sim_y)
+  K <- ncol(sim_y)
+  input_matrix <- if (include_diag) matrix_long_to_matrix2D(rowMeans(sim_y)) else matrix_long_to_matrix2D_offdiag(rowMeans(sim_y))
+  smoothed_matrix <- convolve2d(input_matrix, gaussian_kernel(size = 5, sigma = 1))
+  positive_values <- smoothed_matrix[smoothed_matrix > 0]
+  positive_min <- if (length(positive_values) > 0) min(positive_values) else 1e-6
+  theta <- log(matrix2D_to_matrix_long(smoothed_matrix, include.diag = include_diag) + positive_min)
+
+  mod <- cmdstanr::cmdstan_model(stan_file)
+  sample_args <- list(
+    data = list(
+      N = N,
+      K = K,
+      lambda = rep(coverage, K),
+      b_i = rep(0, N),
+      theta = theta,
+      tau = 1,
+      Y = sim_y
+    ),
+    seed = seed,
+    chains = chains,
+    parallel_chains = parallel_chains,
+    iter_warmup = iter_warmup,
+    iter_sampling = iter_sampling,
+    save_warmup = FALSE,
+    thin = 1,
+    refresh = 25
+  )
+  if (!is.null(output_dir)) sample_args$output_dir <- output_dir
+  fit <- run_cmdstan_sample(mod, sample_args, silent_stan = silent_stan)
+  matrix(fit$summary(variables = "muS")$mean, nrow = N, ncol = K)
+}
+
+run_HiCBZIP_NM <- function(sim_y,
+                           coverage,
+                           stan_file,
+                           r = 1,
+                           threshold = 3,
+                           B = 10,
+                           chains = 2,
+                           parallel_chains = 2,
+                           iter_warmup = 100,
+                           iter_sampling = 100,
+                           include_diag = TRUE,
+                           output_dir = NULL,
+                           seed = 12345,
+                           silent_stan = FALSE) {
+  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+    stop("cmdstanr is required for HiCBZIP-N(M).", call. = FALSE)
+  }
+
+  N <- nrow(sim_y)
+  K <- ncol(sim_y)
+  n_bins <- infer_n_from_long(N, include_diag = include_diag)
+  neighbor_id <- get_neighbor_id(n_bins, r = r, include_diag = include_diag)
+
+  mod <- cmdstanr::cmdstan_model(stan_file)
+  muS <- matrix(NA_real_, nrow = N, ncol = K)
+  colnames(muS) <- colnames(sim_y)
+
+  for (i in seq_len(N)) {
+    if (i == 1 || i %% 25 == 0 || i == N) {
+      message("  HiCBZIP-N(M) row ", i, " / ", N)
+    }
+
+    Y_sim <- sim_y[i, ]
+    Y_input <- if (sum(Y_sim > 0) >= threshold) {
+      Y_sim
+    } else {
+      as.vector(sim_y[neighbor_id[[i]], , drop = FALSE])
+    }
+    prior <- get_EBE_Matched_N_prior(Y_input, c_plus_d = B, lambda = coverage)
+
+    sample_args <- list(
+      data = list(
+        N = K,
+        Y = as.integer(Y_sim),
+        lambda = rep(coverage, K),
+        a_norm = prior$a_norm,
+        sigma_mu = prior$sigma_mu,
+        b_norm = prior$b_norm,
+        sigma_pi = prior$sigma_pi
+      ),
+      seed = seed + i,
+      chains = chains,
+      parallel_chains = parallel_chains,
+      iter_warmup = iter_warmup,
+      iter_sampling = iter_sampling,
+      save_warmup = FALSE,
+      thin = 1,
+      refresh = 0
+    )
+    if (!is.null(output_dir)) sample_args$output_dir <- output_dir
+    fit <- run_cmdstan_sample(mod, sample_args, silent_stan = silent_stan)
+    muS[i, ] <- fit$summary(variables = "mu_tilde")$mean
+  }
+
+  muS
 }

@@ -183,7 +183,7 @@ matrix3D_to_matrix_long = function(matrix3D){
 
 
 matrix_long_to_matrix2D = function(mtx_long, triangle = "lower"){
-  # Function to fill a square matrix with lower triangular values
+  # Reconstruct a symmetric matrix from triangular values including the diagonal.
   filllower <- function(lower_vals) {
     n <- (-1 + sqrt(1 + 8*length(lower_vals))) / 2
     if (floor(n) != n) {
@@ -199,8 +199,9 @@ matrix_long_to_matrix2D = function(mtx_long, triangle = "lower"){
   # Fill the lower triangle
   lower_mat <- filllower(mtx_long)
   
-  # Get full matrix
+  # Get full matrix without doubling diagonal entries.
   full_mat <- lower_mat + t(lower_mat)
+  diag(full_mat) <- diag(lower_mat)
   return(full_mat)
 }
 
