@@ -10,7 +10,7 @@ The repository is organized to help readers reproduce the main analyses from pro
 
 ## Repository Layout
 
-- `HiCBZIP/`: core HiCBZIP model code, including the empirical-Bayes implementation and matched-normal Stan model.
+- `HiCBZIP/`: core HiCBZIP model code, including the empirical-Bayes implementation, Stan models, and imputation functions.
 - `simulations/`: scripts for the manuscript simulation study.
 - `real_data_study_1/`: scripts for the downsampled NPC chrX benchmark.
 - `real_data_study_2/`: scripts for the SCORE oocyte-to-zygote benchmark.
@@ -26,6 +26,7 @@ This release is designed to reproduce manuscript-level results from processed in
 
 ## Main Entry Points
 
+- `examples/run_toy_all_HiCBZIP_variants.R`
 - `simulations/01_run_HiCBZIP_GB_NB_simulation.R`
 - `simulations/02_prepare_simulation_manuscript_summaries.R`
 - `real_data_study_1/01_make_NPC_chrX_processed_input.R`
@@ -39,3 +40,27 @@ This release is designed to reproduce manuscript-level results from processed in
 ## Required Inputs
 
 See `data/README.md` for the expected processed input layout.
+
+## License
+
+This project is released under the MIT License.
+
+## Toy Example
+
+The repository includes a small toy dataset:
+
+```text
+data/toy_chr5_diag20_cells8_lambda0.2.rds
+```
+
+To run the toy example from `code_clean`:
+
+```r
+source("examples/run_toy_all_HiCBZIP_variants.R")
+```
+
+This runs HiCBZIP-GB(NB), HiCBZIP-N(GS), and HiCBZIP-N(M), then writes one
+output file and one 8-cell heatmap per method to `examples/`.
+
+The two Stan variants use short toy MCMC settings by default; increase the
+warmup and sampling iterations for real analyses.
