@@ -1,0 +1,10 @@
+Name: higashi
+Version: 0.1.0a0
+Summary: Higashi: Multiscale and integrative scHi-C analysis
+Home-page: https://github.com/ma-compbio/Higashi
+Author: Ruochi Zhang
+Author-email: ruochiz@andrew.cmu.edu
+License: MIT
+Location: /home/xchen/miniconda3/envs/higashi_env/lib/python3.9/site-packages
+Requires: bokeh, cooler, cython, fbpca, h5py, numpy, pandas, Pillow, scikit-learn, scipy, seaborn, torch, tqdm, umap-learn
+Required-by: 

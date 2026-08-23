@@ -1,0 +1,5 @@
+
+cmdstanr info:
+cmdstanr version: 0.8.1 
+cmdstan path: /home/xchen/miniconda3/envs/stan/bin/cmdstan 
+cmdstan version: 2.36.0 

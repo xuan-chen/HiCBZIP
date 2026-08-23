@@ -1,0 +1,13 @@
+NOT_FOUND fasthigashi PackageNotFoundError('fasthigashi')
+FOUND fast-higashi
+version: 0.1.1a0
+location: /home/xchen/miniconda3/envs/fast_higashi_env/lib/python3.9/site-packages
+
+FOUND Fast-Higashi
+version: 0.1.1a0
+location: /home/xchen/miniconda3/envs/fast_higashi_env/lib/python3.9/site-packages
+
+NOT_FOUND higashi PackageNotFoundError('higashi')
+
+All distributions containing higashi:
+fast-higashi 0.1.1a0 /home/xchen/miniconda3/envs/fast_higashi_env/lib/python3.9/site-packages
