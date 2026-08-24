@@ -9,12 +9,14 @@ source(file.path(script_dir, "..", "_common", "project_paths.R"))
 
 summary_input <- path_here("data", "processed", "simulation", "muS_combined_plot_260124.RData")
 higashi_input <- path_here("data", "processed", "simulation", "higashi_unified_allchr_260208.RData")
-cluster_input <- path_here("data", "processed", "simulation", "muS_combined_plot_260209.RData")
+heatmap_input <- path_here("data", "processed", "simulation", "muS_combined_plot_both_fasthigashi_260613.RData")
+cluster_input <- path_here("results", "simulation", "manuscript_summaries", "muS_combined_plot_260209.RData")
 output_dir <- path_here("results", "simulation", "manuscript_summaries")
 
-require_files(c(summary_input, higashi_input, cluster_input), label = "simulation processed summary input")
+require_files(c(summary_input, higashi_input, heatmap_input), label = "simulation processed summary input")
 ensure_dir(output_dir)
 
 render_rmd(path_here("simulation", "summarize_simulation_metrics.Rmd"), output_dir = output_dir)
+require_files(cluster_input, label = "generated simulation clustering input")
 render_rmd(path_here("simulation", "summarize_simulation_clustering.Rmd"), output_dir = output_dir)
 render_rmd(path_here("simulation", "make_simulation_heatmap_panels.Rmd"), output_dir = output_dir)

@@ -29,7 +29,11 @@ resolution = 50*1e3
 
 
 ```{r}
-load(path_here("data", "processed", "simulation", "muS_combined_plot_260209.RData"))
+cluster_input <- path_here("results", "simulation", "manuscript_summaries", "muS_combined_plot_260209.RData")
+if (!file.exists(cluster_input)) {
+  cluster_input <- path_here("data", "processed", "simulation", "muS_combined_plot_260209.RData")
+}
+load(cluster_input)
 ```
 
 
