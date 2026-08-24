@@ -2,7 +2,7 @@
 
 Ordered public workflow:
 
-1. Place SCORE processed raw inputs under `data/processed/real_data_study_2/`.
+1. Place SCORE processed raw inputs under `data/processed/SCORE_oocyte_zygote/`.
 2. Run `01_build_SCORE_HiCBZIP_inputs.R`.
 3. Add the processed scHiCImpute `.scool` input.
 4. Run `02_run_SCORE_embeddings.R`.

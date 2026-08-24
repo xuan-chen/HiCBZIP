@@ -18,7 +18,7 @@ source_hicbzip_core()
 # Load Data
 
 ```{r}
-load(path_here("data", "processed", "real_data_study_1", "data_NPC250k_0h_X_full.RData"))
+load(path_here("data", "processed", "NPC_chrX", "data_NPC250k_0h_X_full.RData"))
 
 ```
 
@@ -398,7 +398,7 @@ ggplot(scc_muS, aes(x = label, y = SCC, fill = label)) + geom_boxplot() + theme_
 
 
 ```{r}
-gb_nb_file <- path_here("results", "real_data_study_1", "HiCBZIP_GB_NB", "o.bziphic_gbnb.muS.full.AllCoverage.RData")
+gb_nb_file <- path_here("results", "NPC_chrX", "HiCBZIP_GB_NB", "o.bziphic_gbnb.muS.full.AllCoverage.RData")
 ```
 
 ```{r}

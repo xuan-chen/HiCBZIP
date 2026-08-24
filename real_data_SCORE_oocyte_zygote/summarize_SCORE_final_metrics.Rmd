@@ -35,19 +35,19 @@ library(patchwork)
 n_runs <- 10L
 seed_start <- 2026L
 
-innerproduct_nb_root <- path_here("results", "real_data_study_2", "server_json_runs")
-innerproduct_nm_root <- path_here("results", "real_data_study_2", "server_json_runs_nm")
-innerproduct_schicimpute_root <- path_here("results", "real_data_study_2", "oocyte_zygote_schicimpute_10runs_innerproduct")
+innerproduct_nb_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs")
+innerproduct_nm_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs_nm")
+innerproduct_schicimpute_root <- path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_schicimpute_10runs_innerproduct")
 
-snapatac_noidf_nb_root <- path_here("results", "real_data_study_2", "server_json_runs")
-snapatac_noidf_nm_root <- path_here("results", "real_data_study_2", "server_json_runs_nm")
-snapatac_noidf_schicimpute_root <- path_here("results", "real_data_study_2", "oocyte_zygote_schicimpute_10runs_snapatac_noidf")
+snapatac_noidf_nb_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs")
+snapatac_noidf_nm_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs_nm")
+snapatac_noidf_schicimpute_root <- path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_schicimpute_10runs_snapatac_noidf")
 
-schicluster_root <- path_here("results", "real_data_study_2", "oocyte_zygote_schicluster_10runs")
-fast_higashi_root <- path_here("results", "real_data_study_2", "oocyte_zygote_fast_higashi_10runs")
-higashi_root <- path_here("results", "real_data_study_2", "oocyte_zygote_higashi_10runs")
-root_nb <- path_here("results", "real_data_study_2", "server_json_runs")
-root_nm <- path_here("results", "real_data_study_2", "server_json_runs_nm")
+schicluster_root <- path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_schicluster_10runs")
+fast_higashi_root <- path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_fast_higashi_10runs")
+higashi_root <- path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_higashi_10runs")
+root_nb <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs")
+root_nm <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs_nm")
 
 metric_order <- c(
   "ari_agglomerative", "ari_gmm", "ari_k-means", "ari_leiden", "ari_louvain", "best_ari",
@@ -595,7 +595,7 @@ read_pickle_pca2d <- function(embedding_path, reference_path) {
   )
 }
 
-reference_path <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_ref")
+reference_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
 
 pca_map <- tibble::tribble(
   ~run_option,         ~input_label,        ~source_type, ~source_path,                                                                                                           ~cluster_json,
@@ -705,8 +705,8 @@ print(p_pca)
 ## 10) Example Contact Heatmap + scHiCluster Scaled
 
 ```{r example_heatmap_with_schicluster, fig.width=20, fig.height=5.6}
-anchor_path <- path_here("data", "processed", "real_data_study_2", "mm10.genome_split_1M")
-raw_pair_dir <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_mm10", "1M")
+anchor_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
+raw_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
 nb_pair_dir  <- path_here("data", "bhzip_score_compare_from_pairs", "bhzip_1M")
 nm_pair_dir  <- path_here("data", "bhzip_score_compare_from_pairs_nm", "bhzip_nm_1M")
 schic_pair_dir <- path_here("data", "schicimpute_score_compare_from_pairs", "schicimpute_1M")
@@ -964,7 +964,7 @@ print(p_heat)
 ## 11) Save Outputs
 
 ```{r save}
-out_dir <- path_here("results", "real_data_study_2", "paper_metrics_external_impute_plus_integrated_with_higashi_and_fast_higashi")
+out_dir <- path_here("results", "SCORE_oocyte_zygote", "paper_metrics_external_impute_plus_integrated_with_higashi_and_fast_higashi")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 readr::write_csv(long_df, file.path(out_dir, "per_run_metrics_long.csv"))

@@ -1,0 +1,56 @@
+SCL source/build provenance record
+==================================
+
+Local inspected source folder:
+D:/Codex/Test/manuscript/HiCBZIP/code - Copy/SCL1.0_source_code
+
+Server source folder reported by user:
+/home/xchen/schic/software/SCL1.0_source_code
+
+Folder contents:
+- data/
+- outputs/
+- scripts/
+- readme.docx
+
+Key files inspected:
+- readme.docx
+  - size: 20045 bytes
+  - SHA256: 797EC157E2586159C489870882028264931057132D2BE13E2C5A44AE7FD4D56C
+- scripts/scl.cpp
+  - size: 54613 bytes
+  - line count: 1292
+  - SHA256: 6B221242E25AFFFD5F764103786849E3AEACC1A20B316C323F81B155825B05CC
+- scripts/scl
+  - size: 122240 bytes
+  - binary type from header: ELF 64-bit executable
+  - SHA256: 841416793E50CC3A8EE47054094D12B82309DFFC729A0D1774247DB40C21FFA3
+- scripts/scl.exe
+  - size: 347238 bytes
+  - binary type from header: Windows PE executable
+  - SHA256: 292C40D2406622023FFA010C39B0C222A5C01D0BCA4B31CDBE4197D57F472A72
+
+README build command:
+cd SCL1.0_source_code/scripts/
+g++ -o scl scl.cpp
+
+README example command:
+./scl -i ../data/Th1_Cell1_chrX.txt -o ../outputs/Th1_cell1/chrX/50k/Th1_Cell1_chrX_model -res 0.05
+
+Manuscript simulation command pattern:
+SCL_BIN=/home/xchen/schic/software/SCL1.0_source_code/scripts/scl bash simulation/01_run_scl_for_simulation.sh
+
+SCL resolution:
+-res 0.05, where the SCL README states that the unit is Mb, so 0.05 corresponds to 50 kb.
+
+Source/citation:
+SCL version/folder name: SCL1.0_source_code
+Source URL reported by paper: http://dna.cs.miami.edu/SCL/
+Citation: Zhu and Wang, Bioinformatics, 2019; DOI 10.1093/bioinformatics/btz181.
+
+Remaining optional server-specific detail:
+To fully confirm the exact binary used during the original server run, run:
+  /home/xchen/schic/software/SCL1.0_source_code/scripts/scl -h
+  ldd /home/xchen/schic/software/SCL1.0_source_code/scripts/scl
+  g++ --version
+on the server and save the output if desired.

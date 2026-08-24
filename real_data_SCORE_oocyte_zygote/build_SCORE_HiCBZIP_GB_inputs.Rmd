@@ -32,9 +32,9 @@ if (!nzchar(score_bin)) {
 }
 if (!nzchar(score_bin)) stop("`score` command not found.")
 
-raw_data_dir <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_mm10", "1M")
-anchor_file <- path_here("data", "processed", "real_data_study_2", "mm10.genome_split_1M")
-ref_file <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_ref")
+raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
+anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
+ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
 
 if (!dir.exists(raw_data_dir)) stop("Missing raw pair dir: ", raw_data_dir)
 if (!file.exists(anchor_file)) stop("Missing anchor file: ", anchor_file)

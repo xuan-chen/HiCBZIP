@@ -1,10 +1,10 @@
-# Create the processed NPC chrX input object used by real-data study 1.
+# Create the processed NPC chrX input object used by the NPC chrX recovery study.
 #
 # Expected input:
-#   data/processed/real_data_study_1/NPC250k_0h_X.mat
+#   data/processed/NPC_chrX/NPC250k_0h_X.mat
 #
 # Output:
-#   data/processed/real_data_study_1/data_NPC250k_0h_X_full.RData
+#   data/processed/NPC_chrX/data_NPC250k_0h_X_full.RData
 
 script_arg <- commandArgs(FALSE)[grep("^--file=", commandArgs(FALSE))]
 script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", script_arg[[1]]), winslash = "/", mustWork = FALSE)) else getwd()
@@ -14,9 +14,9 @@ source_hicbzip_core()
 
 input_mat <- Sys.getenv(
   "HICBZIP_REAL1_NPC_MAT",
-  unset = path_here("data", "processed", "real_data_study_1", "NPC250k_0h_X.mat")
+  unset = path_here("data", "processed", "NPC_chrX", "NPC250k_0h_X.mat")
 )
-out_dir <- path_here("data", "processed", "real_data_study_1")
+out_dir <- path_here("data", "processed", "NPC_chrX")
 out_file <- file.path(out_dir, "data_NPC250k_0h_X_full.RData")
 
 require_files(input_mat, label = "NPC chrX contact matrix")

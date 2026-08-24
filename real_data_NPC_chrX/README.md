@@ -2,7 +2,7 @@
 
 Ordered public workflow:
 
-1. Place `NPC250k_0h_X.mat` in `data/processed/real_data_study_1/`.
+1. Place `NPC250k_0h_X.mat` in `data/processed/NPC_chrX/`.
 2. Run `01_make_NPC_chrX_processed_input.R`.
 3. Run `02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`.
 4. Run `03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R` for each reported coverage.

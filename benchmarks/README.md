@@ -34,4 +34,4 @@ score embed \
   --seed <seed>
 ```
 
-Use `real_data_study_2/run_SCORE_innerproduct_four_inputs_10runs.R` and `real_data_study_2/run_SCORE_snapatac_four_inputs_10runs.R` as the exact scripted SCORE calls for the public workflow.
+Use `real_data_SCORE_oocyte_zygote/run_SCORE_innerproduct_four_inputs_10runs.R` and `real_data_SCORE_oocyte_zygote/run_SCORE_snapatac_four_inputs_10runs.R` as the exact scripted SCORE calls for the public workflow.

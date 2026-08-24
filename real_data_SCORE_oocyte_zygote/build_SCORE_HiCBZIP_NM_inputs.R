@@ -27,9 +27,9 @@ if (!nzchar(score_bin)) {
 }
 if (!nzchar(score_bin)) stop("`score` command not found.")
 
-raw_data_dir <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_mm10", "1M")
-anchor_file <- path_here("data", "processed", "real_data_study_2", "mm10.genome_split_1M")
-ref_file <- path_here("data", "processed", "real_data_study_2", "oocyte_zygote_ref")
+raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
+anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
+ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
 if (!dir.exists(raw_data_dir)) stop("Missing raw pair dir: ", raw_data_dir)
 if (!file.exists(anchor_file)) stop("Missing anchor file: ", anchor_file)
 if (!file.exists(ref_file)) stop("Missing reference file: ", ref_file)
@@ -55,7 +55,7 @@ stan_file <- Sys.getenv("HICBZIP_NM_STAN_FILE", unset = path_here("HiCBZIP", "BH
 if (!file.exists(stan_file)) stop("Stan file not found. Set HICBZIP_NM_STAN_FILE. Current: ", stan_file)
 
 # Warning capture (persistent log + snapshot)
-log_root <- path_here("results", "real_data_study_2", "input_build_logs")
+log_root <- path_here("results", "SCORE_oocyte_zygote", "input_build_logs")
 ensure_dir(log_root)
 warning_log_file <- file.path(log_root, "warnings_nm.log")
 warning_snapshot_file <- file.path(log_root, "warnings_last50_snapshot.log")

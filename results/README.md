@@ -1,6 +1,11 @@
-# Results README
+# Results layout
 
-Place final shareable output tables and selected figures here when they are needed for reproducibility.
+This folder is for regenerated outputs. Generated files should usually be ignored by Git and archived separately if they are large.
 
-Avoid storing large intermediate files. If results can be regenerated from `code/` and `data/`, document the command instead of committing bulky outputs.
+Expected folders:
 
+- `results/simulation/`
+- `results/NPC_chrX/`
+- `results/SCORE_oocyte_zygote/`
+
+The manuscript repository should keep scripts that generate these outputs, not final PNG figures.

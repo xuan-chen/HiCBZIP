@@ -17,7 +17,7 @@ knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
 
 ```{r}
 source_hicbzip_core()
-source(path_here("simulations", "manuscript_figure_helpers.R"))
+source(path_here("simulation", "manuscript_figure_helpers.R"))
 ```
 
 ## Load Saved Comparison Output

@@ -8,9 +8,9 @@ source_hicbzip_core()
 
 input_file <- Sys.getenv(
   "HICBZIP_REAL1_INPUT_RDATA",
-  unset = path_here("data", "processed", "real_data_study_1", "data_NPC250k_0h_X_full.RData")
+  unset = path_here("data", "processed", "NPC_chrX", "data_NPC250k_0h_X_full.RData")
 )
-out_dir <- path_here("results", "real_data_study_1", "HiCBZIP_GB_NB")
+out_dir <- path_here("results", "NPC_chrX", "HiCBZIP_GB_NB")
 out_file <- file.path(out_dir, "o.bziphic_gbnb.muS.full.AllCoverage.RData")
 
 require_files(input_file, label = "real-data study 1 processed input")

@@ -55,7 +55,7 @@ no_viz <- FALSE
 embedding_alg <- "InnerProduct"
 embedding_dir <- "innerproduct"
 embedding_json <- "innerproduct.json"
-out_root <- path_here("results", "real_data_study_2", "server_json_runs")
+out_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs")
 dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
 
 metric_keys <- c(

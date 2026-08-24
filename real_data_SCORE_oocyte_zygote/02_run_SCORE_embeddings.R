@@ -12,5 +12,5 @@ required_inputs <- c(
 )
 require_files(required_inputs, label = "SCORE .scool input")
 
-source(path_here("real_data_study_2", "run_SCORE_innerproduct_four_inputs_10runs.R"))
-source(path_here("real_data_study_2", "run_SCORE_snapatac_four_inputs_10runs.R"))
+source(path_here("real_data_SCORE_oocyte_zygote", "run_SCORE_innerproduct_four_inputs_10runs.R"))
+source(path_here("real_data_SCORE_oocyte_zygote", "run_SCORE_snapatac_four_inputs_10runs.R"))

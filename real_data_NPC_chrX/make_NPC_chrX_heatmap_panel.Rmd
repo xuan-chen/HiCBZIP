@@ -17,19 +17,19 @@ knitr::opts_knit$set(root.dir = HICBZIP_ROOT)
 
 ```{r}
 source_hicbzip_core()
-source(path_here("simulations", "manuscript_figure_helpers.R"))
+source(path_here("simulation", "manuscript_figure_helpers.R"))
 ```
 
 ## Load Saved Output
 
 ```{r}
-load(path_here("data", "processed", "real_data_study_1", "list_muS_unified_260614.RData"))
+load(path_here("data", "processed", "NPC_chrX", "list_muS_unified_260614.RData"))
 ```
 
 ## Setup
 
 ```{r}
-fig_dir <- path_here("results", "real_data_study_1", "figures")
+fig_dir <- path_here("results", "NPC_chrX", "figures")
 heatmap_dir <- file.path(fig_dir, "heatmaps")
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(heatmap_dir, recursive = TRUE, showWarnings = FALSE)

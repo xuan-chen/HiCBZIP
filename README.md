@@ -11,9 +11,9 @@ The repository is organized to help readers reproduce the main analyses from pro
 ## Repository Layout
 
 - `HiCBZIP/`: core HiCBZIP model code, including the empirical-Bayes implementation, Stan models, and imputation functions.
-- `simulations/`: scripts for the manuscript simulation study.
-- `real_data_study_1/`: scripts for the downsampled NPC chrX benchmark.
-- `real_data_study_2/`: scripts for the SCORE oocyte-to-zygote benchmark.
+- `simulation/`: scripts for the manuscript simulation study.
+- `real_data_NPC_chrX/`: scripts for the downsampled NPC chrX benchmark.
+- `real_data_SCORE_oocyte_zygote/`: scripts for the SCORE oocyte-to-zygote benchmark.
 - `benchmarks/`: version and command notes for external comparison methods.
 - `data/`: small example data and documentation for required processed inputs.
 - `environment/`: software and package version information.
@@ -27,19 +27,25 @@ This release is designed to reproduce manuscript-level results from processed in
 ## Main Entry Points
 
 - `examples/run_toy_all_HiCBZIP_variants.R`
-- `simulations/01_run_HiCBZIP_GB_NB_simulation.R`
-- `simulations/02_prepare_simulation_manuscript_summaries.R`
-- `real_data_study_1/01_make_NPC_chrX_processed_input.R`
-- `real_data_study_1/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`
-- `real_data_study_1/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`
-- `real_data_study_1/04_summarize_NPC_chrX_manuscript_metrics.R`
-- `real_data_study_2/01_build_SCORE_HiCBZIP_inputs.R`
-- `real_data_study_2/02_run_SCORE_embeddings.R`
-- `real_data_study_2/03_summarize_SCORE_manuscript_metrics.R`
+- `simulation/03_run_HiCBZIP_GB_NB_simulation.R`
+- `simulation/04_run_HiCBZIP_NGS_simulation.R`
+- `simulation/05_run_HiCBZIP_NM_simulation.R`
+- `simulation/06_prepare_simulation_manuscript_summaries.R`
+- `real_data_NPC_chrX/01_make_NPC_chrX_processed_input.R`
+- `real_data_NPC_chrX/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`
+- `real_data_NPC_chrX/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`
+- `real_data_NPC_chrX/04_summarize_NPC_chrX_manuscript_metrics.R`
+- `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`
+- `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`
+- `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`
 
 ## Required Inputs
 
 See `data/README.md` for the expected processed input layout.
+
+## Public Source Data
+
+The simulation regeneration scripts start from human brain snm3C-seq indexed-contact files from GSE130711, samples GSM3749700, GSM3750251, and GSM3751478. The two real-data studies use GSE72697/GSM1868576 for the NPC chrX recovery benchmark and GSE305523 plus GSE80006 for the SCORE oocyte-to-zygote benchmark.
 
 ## License
 

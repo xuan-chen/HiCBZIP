@@ -1,7 +1,7 @@
 # Run HiCBZIP-N(M) for NPC chrX at one downsampling level.
 #
 # Usage:
-#   Rscript real_data_study_1/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R 0.01
+#   Rscript real_data_NPC_chrX/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R 0.01
 
 script_arg <- commandArgs(FALSE)[grep("^--file=", commandArgs(FALSE))]
 script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", script_arg[[1]]), winslash = "/", mustWork = FALSE)) else getwd()
@@ -15,13 +15,13 @@ if (is.na(coverage)) coverage <- as.numeric(Sys.getenv("HICBZIP_REAL1_NM_COVERAG
 
 input_file <- Sys.getenv(
   "HICBZIP_REAL1_INPUT_RDATA",
-  unset = path_here("data", "processed", "real_data_study_1", "data_NPC250k_0h_X_full.RData")
+  unset = path_here("data", "processed", "NPC_chrX", "data_NPC250k_0h_X_full.RData")
 )
 stan_file <- Sys.getenv(
   "HICBZIP_NM_STAN_FILE",
   unset = path_here("HiCBZIP", "BHZIP_match_normal.stan")
 )
-out_dir <- path_here("results", "real_data_study_1", "HiCBZIP_NM")
+out_dir <- path_here("results", "NPC_chrX", "HiCBZIP_NM")
 
 require_files(c(input_file, stan_file), label = "real-data study 1 N(M) input")
 ensure_dir(out_dir)
