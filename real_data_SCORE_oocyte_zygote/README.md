@@ -1,12 +1,12 @@
 # Real-data study 2: SCORE benchmark
 
-Ordered public workflow:
+Workflow:
 
 1. Place SCORE processed raw inputs under `data/processed/SCORE_oocyte_zygote/`.
 2. Run `01_build_SCORE_HiCBZIP_inputs.R`.
-3. Add the processed scHiCImpute `.scool` input.
+3. Place the processed scHiCImpute `.scool` input in the path documented in `../data/README.md`.
 4. Run `02_run_SCORE_embeddings.R`.
-5. Add processed integrated-method JSON result folders for scHiCluster, Higashi, and Fast-Higashi.
+5. Place processed integrated-method JSON result folders for scHiCluster, Higashi, and Fast-Higashi in the paths documented in `../data/README.md`.
 6. Run `03_summarize_SCORE_manuscript_metrics.R`.
 
 Included source workflows:

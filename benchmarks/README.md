@@ -1,16 +1,16 @@
-# External benchmark methods
+# External Benchmark Methods
 
-The public repository documents external benchmark methods by version and command notes. Full local runner folders are not included unless a reviewer specifically asks for them.
+This directory documents the external methods used for comparison in the HiCBZIP manuscript. The repository focuses on the HiCBZIP implementation and final reproducibility workflows; external packages are run through their own software distributions and consumed as processed outputs by the summary scripts.
 
-## Required notes to fill before release
+## Provenance Summary
 
-| Method | What to document | Consumed by clean workflow |
+| Method | Documentation included here | Consumed by workflow |
 | --- | --- | --- |
-| scHiCluster | Version/commit, contact-pair input format, imputed matrix output format, command template | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder |
-| HiCImpute | Version/commit, input matrix format, imputed output format, command template | Simulation summaries, NPC chrX summaries |
-| Higashi | Version/commit, config fields, command template, export/conversion notes | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder |
-| Fast-Higashi | Version/commit, config fields, command template, export/conversion notes | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder |
-| SCORE | Version/commit, Python environment, `score cooler`, `score embed InnerProduct`, and `score embed SnapATAC` commands | Real-data study 2 |
+| scHiCluster | Input/output format and command template for generated matrix or JSON summaries. | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder. |
+| HiCImpute | Input/output format and command template for imputed contact matrices. | Simulation summaries and NPC chrX summaries. |
+| Higashi | Environment record, configuration fields, and export/conversion template. | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder. |
+| Fast-Higashi | Environment record, configuration fields, and export/conversion template. | Simulation summaries, NPC chrX summaries, SCORE integrated-result JSON folder. |
+| SCORE | Environment record and command template for `score cooler`, `score embed InnerProduct`, and `score embed SnapATAC`. | Real-data study 2. |
 
 ## SCORE command template
 
@@ -34,4 +34,7 @@ score embed \
   --seed <seed>
 ```
 
-Use `real_data_SCORE_oocyte_zygote/run_SCORE_innerproduct_four_inputs_10runs.R` and `real_data_SCORE_oocyte_zygote/run_SCORE_snapatac_four_inputs_10runs.R` as the exact scripted SCORE calls for the public workflow.
+The scripted SCORE calls used by the reproducibility workflow are provided in:
+
+- `real_data_SCORE_oocyte_zygote/run_SCORE_innerproduct_four_inputs_10runs.R`
+- `real_data_SCORE_oocyte_zygote/run_SCORE_snapatac_four_inputs_10runs.R`

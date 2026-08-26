@@ -5,7 +5,7 @@
 # hard-coded chromosome window to all processed simulation windows.
 #
 # Expected input:
-#   data/processed/simulation/input/Simulation_snm3Cseq_human_brian_astrocytes_50k_chr*_K3X10.RData
+#   data/processed/simulation/input/Simulation_snm3Cseq_human_brain_astrocytes_50k_chr*_K3X10.RData
 # Each RData file must contain `true_muS`, an N-pair by K-cell ground-truth matrix.
 #
 # Output:
@@ -51,7 +51,7 @@ chains <- as.integer(Sys.getenv("HICBZIP_STAN_CHAINS", unset = "2"))
 parallel_chains <- chains
 
 list_sim_files <- function(dir) {
-  patt <- "^Simulation_snm3Cseq_human_brian_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
+  patt <- "^Simulation_snm3Cseq_human_brain_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
   list.files(dir, pattern = patt, full.names = TRUE)
 }
 

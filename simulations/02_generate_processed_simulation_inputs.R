@@ -10,7 +10,7 @@
 #   data/processed/simulation/scl_outputs/<region>/GSM..._<region>.txt
 #
 # Output:
-#   data/processed/simulation/input/Simulation_snm3Cseq_human_brian_astrocytes_50k_chr*_..._K3X10.RData
+#   data/processed/simulation/input/Simulation_snm3Cseq_human_brain_astrocytes_50k_chr*_..._K3X10.RData
 
 script_arg <- commandArgs(FALSE)[grep("^--file=", commandArgs(FALSE))]
 script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", script_arg[[1]]), winslash = "/", mustWork = FALSE)) else getwd()
@@ -124,7 +124,7 @@ for (r in seq_len(nrow(simulation_regions))) {
   out_file <- file.path(
     out_dir,
     paste0(
-      "Simulation_snm3Cseq_human_brian_astrocytes_",
+      "Simulation_snm3Cseq_human_brain_astrocytes_",
       resolution / 1000, "k_chr", reg$chr, "_",
       reg$start_bp / 1e6, "M_", reg$end_bp / 1e6, "M_md",
       max_dist / 1e6, "M_K3X10.RData"

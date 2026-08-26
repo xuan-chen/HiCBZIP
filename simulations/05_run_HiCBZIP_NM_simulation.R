@@ -5,7 +5,7 @@
 # hard-coded chromosome window to all processed simulation windows.
 #
 # Expected input:
-#   data/processed/simulation/input/Simulation_snm3Cseq_human_brian_astrocytes_50k_chr*_K3X10.RData
+#   data/processed/simulation/input/Simulation_snm3Cseq_human_brain_astrocytes_50k_chr*_K3X10.RData
 # Each RData file must contain `true_muS`, an N-pair by K-cell ground-truth matrix.
 #
 # Output:
@@ -57,7 +57,7 @@ worker_default <- max(1, parallel::detectCores() - 1)
 workers <- as.integer(Sys.getenv("HICBZIP_NM_WORKERS", unset = as.character(worker_default)))
 
 list_sim_files <- function(dir) {
-  patt <- "^Simulation_snm3Cseq_human_brian_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
+  patt <- "^Simulation_snm3Cseq_human_brain_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
   list.files(dir, pattern = patt, full.names = TRUE)
 }
 

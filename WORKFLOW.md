@@ -1,6 +1,6 @@
 # HiCBZIP Reproducibility Workflow
 
-This document describes the study-by-study workflow used to reproduce the HiCBZIP manuscript analyses from the required source files and processed inputs. Large processed inputs and generated outputs are documented here and in `data/README.md`; they should be downloaded from the associated data archive before running the full workflows.
+This document describes the study-by-study workflow used to reproduce the HiCBZIP manuscript analyses from public source files and processed inputs. Large processed inputs and generated outputs are documented here and in `data/README.md`; they are obtained from the cited public sources or associated data archives before running the full workflows.
 
 ## Core method
 
@@ -23,7 +23,7 @@ Steps:
    - Run SCL using `simulation/01_run_scl_for_simulation.sh`.
    - Run `simulation/02_generate_processed_simulation_inputs.R`.
 2. Alternatively, start from archived processed simulation inputs by placing the RData files in `data/processed/simulation/input/`.
-   - Each file should contain `true_muS`.
+   - Each file contains `true_muS`.
 3. Run `simulation/03_run_HiCBZIP_GB_NB_simulation.R`.
    - Generates `results/simulation/HiCBZIP_GB_NB/BZIP_N_GB_muS_allchr_allcov.rds`.
 4. Run `simulation/04_run_HiCBZIP_NGS_simulation.R`.
@@ -72,9 +72,9 @@ Steps:
 6. Run `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`.
    - Renders the final SCORE metric summary workflow.
 
-## Files Not Tracked in Git
+## Files Excluded From Git
 
 - Generated figure PNGs.
-- Local `.Rhistory`, HTML notebooks, logs, or cache files.
+- `.Rhistory`, HTML notebooks, logs, and cache files.
 - Full external method working directories.
 - Large `.RData`, `.mat`, `.scool`, and raw contact files, unless intentionally tracked with Git LFS.

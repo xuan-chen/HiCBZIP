@@ -32,7 +32,7 @@ g++ -o scl scl.cpp
 The manuscript workflow uses:
 
 ```bash
-SCL_BIN=/home/xchen/schic/software/SCL1.0_source_code/scripts/scl bash simulation/01_run_scl_for_simulation.sh
+SCL_BIN=/path/to/SCL1.0_source_code/scripts/scl bash simulation/01_run_scl_for_simulation.sh
 ```
 
 The SCL source/executable record and hashes are stored in `environment/scl_source_record.txt`.

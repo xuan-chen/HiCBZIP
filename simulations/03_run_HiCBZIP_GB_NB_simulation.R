@@ -1,7 +1,7 @@
 # Run HiCBZIP-GB/GB(NB) on the processed simulation inputs used in the manuscript.
 #
 # Expected input:
-#   data/processed/simulation/input/Simulation_snm3Cseq_human_brian_astrocytes_50k_chr*_K3X10.RData
+#   data/processed/simulation/input/Simulation_snm3Cseq_human_brain_astrocytes_50k_chr*_K3X10.RData
 # Each RData file must contain `true_muS`, an N-pair by K-cell ground-truth matrix.
 #
 # Output:
@@ -30,7 +30,7 @@ lambda_list <- as.numeric(strsplit(
 )[[1]])
 
 list_sim_files <- function(dir) {
-  patt <- "^Simulation_snm3Cseq_human_brian_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
+  patt <- "^Simulation_snm3Cseq_human_brain_astrocytes_50k_chr[0-9XY]+_.*_K3X10\\.RData$"
   list.files(dir, pattern = patt, full.names = TRUE)
 }
 

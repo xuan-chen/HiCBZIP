@@ -1,6 +1,6 @@
 # Results layout
 
-This folder is for regenerated outputs. Generated files should usually be ignored by Git and archived separately if they are large.
+This directory defines the expected layout for regenerated manuscript outputs. The workflows write simulation, NPC chrX, and SCORE benchmark results into the folders below.
 
 Expected folders:
 
@@ -8,4 +8,4 @@ Expected folders:
 - `results/NPC_chrX/`
 - `results/SCORE_oocyte_zygote/`
 
-The manuscript repository should keep scripts that generate these outputs, not final PNG figures.
+Generated figures and large result files are excluded from GitHub. They can be regenerated from the scripts and processed inputs documented in this repository.
