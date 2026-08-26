@@ -2,10 +2,10 @@ SCL source/build provenance record
 ==================================
 
 Local inspected source folder:
-D:/Codex/Test/manuscript/HiCBZIP/code - Copy/SCL1.0_source_code
+<LOCAL_STAGING_SOURCE>/SCL1.0_source_code
 
 Server source folder reported by user:
-/home/xchen/schic/software/SCL1.0_source_code
+<PROJECT_SOFTWARE_ROOT>/SCL1.0_source_code
 
 Folder contents:
 - data/
@@ -38,7 +38,7 @@ README example command:
 ./scl -i ../data/Th1_Cell1_chrX.txt -o ../outputs/Th1_cell1/chrX/50k/Th1_Cell1_chrX_model -res 0.05
 
 Manuscript simulation command pattern:
-SCL_BIN=/home/xchen/schic/software/SCL1.0_source_code/scripts/scl bash simulation/01_run_scl_for_simulation.sh
+SCL_BIN=<PROJECT_SOFTWARE_ROOT>/SCL1.0_source_code/scripts/scl bash simulation/01_run_scl_for_simulation.sh
 
 SCL resolution:
 -res 0.05, where the SCL README states that the unit is Mb, so 0.05 corresponds to 50 kb.
@@ -50,7 +50,7 @@ Citation: Zhu and Wang, Bioinformatics, 2019; DOI 10.1093/bioinformatics/btz181.
 
 Remaining optional server-specific detail:
 To fully confirm the exact binary used during the original server run, run:
-  /home/xchen/schic/software/SCL1.0_source_code/scripts/scl -h
-  ldd /home/xchen/schic/software/SCL1.0_source_code/scripts/scl
+  <PROJECT_SOFTWARE_ROOT>/SCL1.0_source_code/scripts/scl -h
+  ldd <PROJECT_SOFTWARE_ROOT>/SCL1.0_source_code/scripts/scl
   g++ --version
 on the server and save the output if desired.

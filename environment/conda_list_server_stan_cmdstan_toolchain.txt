@@ -1,4 +1,4 @@
-# packages in environment at /home/xchen/miniconda3/envs/stan:
+# packages in environment at <CONDA_ENVS>/stan:
 #
 # Name                    Version                   Build  Channel
 _libgcc_mutex             0.1                 conda_forge    conda-forge

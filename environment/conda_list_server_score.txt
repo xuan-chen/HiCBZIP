@@ -1,4 +1,4 @@
-# packages in environment at /home/xchen/miniconda3/envs/score:
+# packages in environment at <CONDA_ENVS>/score:
 #
 # Name                    Version                   Build  Channel
 _libgcc_mutex             0.1                        main  
