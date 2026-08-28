@@ -24,6 +24,10 @@ The repository is organized to help readers reproduce the main analyses from pro
 
 This release is designed to reproduce manuscript-level results from processed inputs. It includes the HiCBZIP method implementation, final analysis workflows, small test data, and environment records. Exploratory notebooks, large intermediate files, generated figures, and full external-method working directories are excluded.
 
+## Run Status
+
+The toy workflow can be run directly from the small example dataset included in this repository. Full manuscript-scale workflows require the processed data archives and public source files listed in `data/README.md`; these large inputs are not tracked in Git.
+
 ## Main Entry Points
 
 - `examples/run_toy_all_HiCBZIP_variants.R`

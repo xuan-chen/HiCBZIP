@@ -14,6 +14,8 @@ Ordered public workflow:
 5. Add processed non-regenerated external benchmark outputs under `data/processed/simulation/`.
 6. Run `06_prepare_simulation_manuscript_summaries.R`.
 
+Full manuscript-scale simulation workflows require the processed simulation archive listed in `../data/README.md`. The repository includes the scripts and expected paths, while large processed inputs and regenerated outputs are distributed outside Git.
+
 Included manuscript summary notebooks:
 
 - `summarize_simulation_metrics.Rmd`
