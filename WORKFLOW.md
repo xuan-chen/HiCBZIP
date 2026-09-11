@@ -30,8 +30,9 @@ Steps:
    - Generates one HiCBZIP-N(GS) CmdStan output per chromosome and coverage.
 5. Run `simulation/05_run_HiCBZIP_NM_simulation.R`.
    - Generates one HiCBZIP-N(M) CmdStan output per chromosome and coverage.
-6. Place processed outputs for external methods in `data/processed/simulation/`.
+6. Place processed outputs for benchmark methods in `data/processed/simulation/`.
    - Examples: HiCImpute, scHiCluster, Higashi, Fast-Higashi.
+   - Study-specific benchmark-method workflows are provided in `simulation/benchmark_methods/`.
 7. Run `simulation/06_prepare_simulation_manuscript_summaries.R`.
    - Renders SMSE, SCC, insulation-score, clustering, and heatmap summary workflows.
 
@@ -41,16 +42,20 @@ Purpose: reproduce the downsampled NPC bulk Hi-C chromosome X recovery benchmark
 
 Steps:
 
-1. Put `NPC250k_0h_X.mat` in `data/processed/NPC_chrX/`.
-2. Run `real_data_NPC_chrX/01_make_NPC_chrX_processed_input.R`.
+1. For manuscript figure and metric reproduction, put the archived unified NPC object in `data/processed/NPC_chrX/list_muS_unified_260614.RData`.
+   - This object contains Raw, HiCBZIP-GB/GB(NB), HiCBZIP-N(M), HiCImpute, scHiCluster, Higashi, and Fast-Higashi matrices across the reported downsampling levels.
+   - Run `real_data_NPC_chrX/05_summarize_NPC_chrX_manuscript_metrics.R`.
+2. To rerun the HiCBZIP portions, put the processed NPC chrX reference matrix in `data/processed/NPC_chrX/NPC250k_0h_X.mat`.
+   - This matrix is derived from the public NPC Hi-C source data from GSE72697, sample GSM1868576.
+3. Run `real_data_NPC_chrX/01_make_NPC_chrX_processed_input.R`.
    - Generates `data/processed/NPC_chrX/data_NPC250k_0h_X_full.RData`.
-3. Run `real_data_NPC_chrX/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`.
+4. Run `real_data_NPC_chrX/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`.
    - Generates GB/NB imputation results for all downsampling levels.
-4. Run `real_data_NPC_chrX/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R` for each reported coverage.
+5. Run `real_data_NPC_chrX/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R` for each reported coverage.
    - This is computationally heavier and uses CmdStan.
-5. Place processed external benchmark outputs for scHiCluster, HiCImpute, Higashi, and Fast-Higashi in the paths documented in `data/README.md`.
-6. Run `real_data_NPC_chrX/04_summarize_NPC_chrX_manuscript_metrics.R`.
-   - Renders the SCC, insulation-score, and heatmap workflows.
+6. To rebuild the unified NPC object from all method outputs, run `real_data_NPC_chrX/04_build_NPC_chrX_combined_method_object.R`.
+   - Detailed benchmark-method workflows are kept in `real_data_NPC_chrX/benchmark_methods/`.
+   - Benchmark-method provenance is documented in `benchmarks/README.md`.
 
 ## SCORE mouse oocyte-to-zygote study
 
@@ -67,7 +72,7 @@ Steps:
 3. Place the processed scHiCImpute `.scool` input in the path documented in `data/README.md`.
 4. Run `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`.
    - Runs InnerProduct and SnapATAC/no-IDF over Raw, HiCBZIP-GB/GB(NB), HiCBZIP-N(M), and scHiCImpute.
-5. Place processed metric JSON folders for integrated external methods in the paths documented in `data/README.md`.
+5. Place processed metric JSON folders for integrated benchmark methods in the paths documented in `data/README.md`.
    - scHiCluster, Higashi, and Fast-Higashi.
 6. Run `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`.
    - Renders the final SCORE metric summary workflow.
@@ -76,5 +81,5 @@ Steps:
 
 - Generated figure PNGs.
 - `.Rhistory`, HTML notebooks, logs, and cache files.
-- Full external method working directories.
+- Full benchmark method working directories.
 - Large `.RData`, `.mat`, `.scool`, and raw contact files, unless intentionally tracked with Git LFS.

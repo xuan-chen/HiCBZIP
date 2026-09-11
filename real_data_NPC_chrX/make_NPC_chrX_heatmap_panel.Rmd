@@ -45,7 +45,7 @@ method_levels_display <- c(
 )
 
 method_label_map <- c(
-  "Raw" = "Simulated (Raw)",
+  "Raw" = "Raw",
   "HiCBZIP-GB(NB)" = "HiCBZIP-GB(NB)",
   "HiCBZIP-N(M)" = "HiCBZIP-N(M)",
   "HiCImpute" = "HiCImpute",
@@ -207,10 +207,10 @@ dev.off()
 scc_display <- scc_muS %>%
   mutate(
     Method = recode(as.character(Method), !!!method_label_map),
-    Method = factor(Method, levels = c("Simulated (Raw)", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
+    Method = factor(Method, levels = c("Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
     coverage = factor(ld, levels = lambda_list, ordered = TRUE)
   ) %>%
-  filter(Method != "Simulated (Raw)") %>%
+  filter(Method != "Raw") %>%
   left_join(cov_label_df, by = c("ld" = "coverage"))
 ```
 
@@ -265,10 +265,10 @@ save_manuscript_plot(
 IS_display <- IS_vector_plot2 %>%
   mutate(
     Method = recode(as.character(Method), !!!method_label_map),
-    Method = factor(Method, levels = c("Simulated (Raw)", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
+    Method = factor(Method, levels = c("Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute", "scHiCluster", "Higashi", "Fast-Higashi")),
     coverage = factor(ld, levels = lambda_list, ordered = TRUE)
   ) %>%
-  filter(Method != "Simulated (Raw)") %>%
+  filter(Method != "Raw") %>%
   left_join(cov_label_df, by = c("ld" = "coverage"))
 ```
 
