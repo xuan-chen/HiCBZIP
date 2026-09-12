@@ -7,6 +7,7 @@ source(file.path(script_dir, "..", "_common", "project_paths.R"))
 required_inputs <- c(
   path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_raw_1M.scool"),
   path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_bhzip_1M.scool"),
+  path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_raw_1M.scool"),
   path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_bhzip_nm_1M.scool"),
   path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_schicimpute_1M.scool")
 )

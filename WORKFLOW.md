@@ -69,11 +69,12 @@ Steps:
    - `oocyte_zygote_ref`
 2. Run `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`.
    - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) `.scool` inputs.
-3. Place the processed scHiCImpute `.scool` input in the path documented in `data/README.md`.
+3. Build or provide the processed scHiCImpute `.scool` input.
+   - The study-specific script is `real_data_SCORE_oocyte_zygote/benchmark_methods/01_build_scHiCImpute_SCORE_inputs.R`.
 4. Run `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`.
    - Runs InnerProduct and SnapATAC/no-IDF over Raw, HiCBZIP-GB/GB(NB), HiCBZIP-N(M), and scHiCImpute.
-5. Place processed metric JSON folders for integrated benchmark methods in the paths documented in `data/README.md`.
-   - scHiCluster, Higashi, and Fast-Higashi.
+5. Run or provide processed metric JSON folders for integrated benchmark methods.
+   - Study-specific scripts for scHiCluster, Higashi, and Fast-Higashi are in `real_data_SCORE_oocyte_zygote/benchmark_methods/`.
 6. Run `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`.
    - Renders the final SCORE metric summary workflow.
 

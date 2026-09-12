@@ -4,7 +4,7 @@ This directory gives a top-level provenance summary for benchmark methods used i
 
 - `simulation/benchmark_methods/`
 - `real_data_NPC_chrX/benchmark_methods/`
-- `real_data_SCORE_oocyte_zygote/`
+- `real_data_SCORE_oocyte_zygote/benchmark_methods/`
 
 The main repository workflow focuses on HiCBZIP method code, archived manuscript-scale data objects, and final summary scripts. Full benchmark-method working directories, logs, temporary files, and large generated outputs are excluded from Git.
 

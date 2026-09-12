@@ -27,11 +27,11 @@ if (!nzchar(score_bin)) {
 if (!nzchar(score_bin)) stop("`score` command not found.")
 
 inputs <- tibble::tribble(
-  ~input_code,    ~input_label,       ~scool_path,                                                                 ~ref_path,
-  "raw",          "Raw",              path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_raw_1M.scool"),          path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv"),
-  "bhzip",        "HiCBZIP-GB(NB)",   path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_bhzip_1M.scool"),        path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv"),
-  "bhzip_nm",     "HiCBZIP-N(M)",     path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_bhzip_nm_1M.scool"),  path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_ref_min_depth_5000.tsv"),
-  "schicimpute",  "scHiCImpute",      path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_schicimpute_1M.scool"), path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv")
+  ~input_code,    ~input_label,       ~scool_path,                                                                 ~ref_path,                                                                       ~out_root,                                                                      ~dset_template,
+  "raw",          "Raw",              path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_raw_1M.scool"),          path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv"),          path_here("results", "SCORE_oocyte_zygote", "server_json_runs"),                              "oocyte_zygote_raw_pairs_r%02d",
+  "bhzip",        "HiCBZIP-GB(NB)",   path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_bhzip_1M.scool"),        path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv"),          path_here("results", "SCORE_oocyte_zygote", "server_json_runs"),                              "oocyte_zygote_bhzip_pairs_r%02d",
+  "bhzip_nm",     "HiCBZIP-N(M)",     path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_bhzip_nm_1M.scool"),  path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_ref_min_depth_5000.tsv"),       path_here("results", "SCORE_oocyte_zygote", "server_json_runs_nm"),                           "oocyte_zygote_bhzip_nm_pairs_r%02d",
+  "schicimpute",  "scHiCImpute",      path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_schicimpute_1M.scool"), path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv"), path_here("results", "SCORE_oocyte_zygote", "oocyte_zygote_schicimpute_10runs_innerproduct"), "oocyte_zygote_schicimpute_pairs_r%02d"
 )
 
 missing_inputs <- inputs %>%
@@ -55,8 +55,9 @@ no_viz <- FALSE
 embedding_alg <- "InnerProduct"
 embedding_dir <- "innerproduct"
 embedding_json <- "innerproduct.json"
-out_root <- path_here("results", "SCORE_oocyte_zygote", "server_json_runs")
-dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
+summary_out_root <- path_here("results", "SCORE_oocyte_zygote", "external_imputation_innerproduct_10runs")
+dir.create(summary_out_root, recursive = TRUE, showWarnings = FALSE)
+invisible(lapply(unique(inputs$out_root), dir.create, recursive = TRUE, showWarnings = FALSE))
 
 metric_keys <- c(
   "ari_k-means", "ari_agglomerative", "ari_gmm", "ari_louvain", "ari_leiden", "best_ari",
@@ -95,8 +96,8 @@ extract_metric <- function(path, key) {
   NA_real_
 }
 
-run_one_experiment <- function(input_code, input_label, scool_path, ref_path, run_idx, seed) {
-  dset_name <- sprintf("oocyte_zygote_%s_pairs_r%02d", input_code, run_idx)
+run_one_experiment <- function(input_code, input_label, scool_path, ref_path, out_root, dset_template, run_idx, seed) {
+  dset_name <- sprintf(dset_template, run_idx)
   metrics_json <- file.path(out_root, dset_name, "1M", embedding_dir, embedding_json)
 
   if (force_rerun || !file.exists(metrics_json)) {
@@ -134,6 +135,8 @@ for (i in seq_len(n_runs)) {
       input_label = inputs$input_label[[j]],
       scool_path = inputs$scool_path[[j]],
       ref_path = inputs$ref_path[[j]],
+      out_root = inputs$out_root[[j]],
+      dset_template = inputs$dset_template[[j]],
       run_idx = i,
       seed = seed_i
     )
@@ -180,8 +183,8 @@ final_report_df <- summary_df %>%
 
 print(final_report_df)
 
-write.csv(results_df, file.path(out_root, "per_run_metrics.csv"), row.names = FALSE)
-write.csv(summary_df, file.path(out_root, "summary_mean_sd.csv"), row.names = FALSE)
-write.csv(final_report_df, file.path(out_root, "final_report_mean_sd.csv"), row.names = FALSE)
+write.csv(results_df, file.path(summary_out_root, "per_run_metrics.csv"), row.names = FALSE)
+write.csv(summary_df, file.path(summary_out_root, "summary_mean_sd.csv"), row.names = FALSE)
+write.csv(final_report_df, file.path(summary_out_root, "final_report_mean_sd.csv"), row.names = FALSE)
 
-cat("Saved output tables to:", out_root, "\n")
+cat("Saved output tables to:", summary_out_root, "\n")
