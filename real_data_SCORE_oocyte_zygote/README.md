@@ -4,9 +4,9 @@ This folder contains the public workflow for the mouse oocyte-to-zygote downstre
 
 ## Main Workflow
 
-1. Place SCORE processed raw inputs under `data/processed/SCORE_oocyte_zygote/`.
+1. Place SCORE processed raw inputs under `data/processed/SCORE_oocyte_zygote/source_inputs/`.
 2. Run `01_build_SCORE_HiCBZIP_inputs.R`.
-   - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) SCORE-ready `.scool` inputs.
+   - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) SCORE-ready `.scool` inputs under `data/processed/SCORE_oocyte_zygote/score_ready_inputs/`.
 3. Build or provide the scHiCImpute `.scool` input described in `benchmark_methods/README.md`.
 4. Run `02_run_SCORE_embeddings.R`.
    - Runs SCORE InnerProduct and SnapATAC/no-IDF for Raw, HiCBZIP-GB/GB(NB), HiCBZIP-N(M), and scHiCImpute.

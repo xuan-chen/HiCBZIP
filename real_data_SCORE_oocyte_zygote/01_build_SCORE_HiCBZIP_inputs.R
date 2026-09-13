@@ -7,9 +7,9 @@ script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", 
 source(file.path(script_dir, "..", "_common", "project_paths.R"))
 
 required_inputs <- c(
-  path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M"),
-  path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M"),
-  path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_mm10", "1M"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "mm10.genome_split_1M"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_ref"),
   path_here("HiCBZIP", "BHZIP_match_normal.stan")
 )
 require_dirs(required_inputs[1], label = "SCORE raw pair directory")

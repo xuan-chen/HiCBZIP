@@ -32,9 +32,9 @@ if (!nzchar(score_bin)) {
 }
 if (!nzchar(score_bin)) stop("`score` command not found.")
 
-raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
-anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
-ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
+raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_mm10", "1M")
+anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "mm10.genome_split_1M")
+ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_ref")
 
 if (!dir.exists(raw_data_dir)) stop("Missing raw pair dir: ", raw_data_dir)
 if (!file.exists(anchor_file)) stop("Missing anchor file: ", anchor_file)
@@ -91,7 +91,7 @@ ref_subset <- ref2 %>%
     cluster = cluster
   )
 
-out_root <- path_here("data", "bhzip_score_compare_from_pairs")
+out_root <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB")
 dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
 ref_subset_file <- file.path(out_root, "oocyte_zygote_ref_min_depth_5000.tsv")
 write.table(ref_subset, ref_subset_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)

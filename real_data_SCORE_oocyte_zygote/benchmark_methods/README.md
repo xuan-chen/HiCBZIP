@@ -7,20 +7,20 @@ This folder contains study-specific benchmark-method workflows for real-data stu
 Run `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R` first, or provide equivalent SCORE-ready files at:
 
 ```text
-data/bhzip_score_compare_from_pairs/oocyte_zygote_raw_1M.scool
-data/bhzip_score_compare_from_pairs/oocyte_zygote_bhzip_1M.scool
-data/bhzip_score_compare_from_pairs/oocyte_zygote_ref_min_depth_5000.tsv
-data/bhzip_score_compare_from_pairs_nm/oocyte_zygote_raw_1M.scool
-data/bhzip_score_compare_from_pairs_nm/oocyte_zygote_bhzip_nm_1M.scool
-data/bhzip_score_compare_from_pairs_nm/oocyte_zygote_ref_min_depth_5000.tsv
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_GB_NB/oocyte_zygote_raw_1M.scool
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_GB_NB/oocyte_zygote_bhzip_1M.scool
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_GB_NB/oocyte_zygote_ref_min_depth_5000.tsv
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_NM/oocyte_zygote_raw_1M.scool
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_NM/oocyte_zygote_bhzip_nm_1M.scool
+data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_NM/oocyte_zygote_ref_min_depth_5000.tsv
 ```
 
 The scHiCImpute script also needs the SCORE-formatted raw pair files:
 
 ```text
-data/processed/SCORE_oocyte_zygote/oocyte_zygote_mm10/1M/
-data/processed/SCORE_oocyte_zygote/mm10.genome_split_1M
-data/processed/SCORE_oocyte_zygote/oocyte_zygote_ref
+data/processed/SCORE_oocyte_zygote/source_inputs/oocyte_zygote_mm10/1M/
+data/processed/SCORE_oocyte_zygote/source_inputs/mm10.genome_split_1M
+data/processed/SCORE_oocyte_zygote/source_inputs/oocyte_zygote_ref
 ```
 
 ## Scripts

@@ -15,9 +15,9 @@ if (length(missing_pkgs) > 0) {
 
 score_bin <- resolve_score_bin()
 
-raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
-anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
-ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
+raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_mm10", "1M")
+anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "mm10.genome_split_1M")
+ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_ref")
 
 require_dirs(raw_data_dir, label = "SCORE raw pair directory")
 require_files(c(anchor_file, ref_file), label = "SCORE processed input")
@@ -113,7 +113,7 @@ ref2 <- ref %>%
 
 if (nrow(ref2) < 2) stop("Too few matched cells after filtering.", call. = FALSE)
 
-out_root <- path_here("data", "schicimpute_score_compare_from_pairs")
+out_root <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "scHiCImpute")
 ensure_dir(out_root)
 
 ref_subset_file <- file.path(out_root, "oocyte_zygote_ref_min_depth_5000.tsv")
@@ -197,4 +197,3 @@ run_score_cmd(
 )
 
 cat("Built scHiCImpute .scool:", schicimpute_scool, "\n")
-

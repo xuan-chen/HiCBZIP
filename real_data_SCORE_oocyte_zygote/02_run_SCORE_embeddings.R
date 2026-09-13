@@ -5,11 +5,11 @@ script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", 
 source(file.path(script_dir, "..", "_common", "project_paths.R"))
 
 required_inputs <- c(
-  path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_raw_1M.scool"),
-  path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_bhzip_1M.scool"),
-  path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_raw_1M.scool"),
-  path_here("data", "bhzip_score_compare_from_pairs_nm", "oocyte_zygote_bhzip_nm_1M.scool"),
-  path_here("data", "schicimpute_score_compare_from_pairs", "oocyte_zygote_schicimpute_1M.scool")
+  path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB", "oocyte_zygote_raw_1M.scool"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB", "oocyte_zygote_bhzip_1M.scool"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_NM", "oocyte_zygote_raw_1M.scool"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_NM", "oocyte_zygote_bhzip_nm_1M.scool"),
+  path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "scHiCImpute", "oocyte_zygote_schicimpute_1M.scool")
 )
 require_files(required_inputs, label = "SCORE .scool input")
 

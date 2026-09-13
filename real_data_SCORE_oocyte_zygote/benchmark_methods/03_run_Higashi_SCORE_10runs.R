@@ -8,8 +8,8 @@ source(file.path(script_dir, "score_benchmark_helpers.R"))
 
 score_bin <- resolve_score_bin()
 
-raw_scool <- path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_raw_1M.scool")
-ref_file <- path_here("data", "bhzip_score_compare_from_pairs", "oocyte_zygote_ref_min_depth_5000.tsv")
+raw_scool <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB", "oocyte_zygote_raw_1M.scool")
+ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB", "oocyte_zygote_ref_min_depth_5000.tsv")
 require_files(c(raw_scool, ref_file), label = "SCORE Higashi input")
 
 n_runs <- 10L
@@ -82,4 +82,3 @@ write.csv(summary_df, file.path(out_root, "summary_mean_sd.csv"), row.names = FA
 
 cat("Saved Higashi SCORE outputs to:", out_root, "\n")
 cat("Saved per-run stdout/stderr logs to:", log_root, "\n")
-

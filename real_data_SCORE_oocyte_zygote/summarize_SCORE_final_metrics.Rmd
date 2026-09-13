@@ -595,7 +595,7 @@ read_pickle_pca2d <- function(embedding_path, reference_path) {
   )
 }
 
-reference_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_ref")
+reference_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_ref")
 
 pca_map <- tibble::tribble(
   ~run_option,         ~input_label,        ~source_type, ~source_path,                                                                                                           ~cluster_json,
@@ -705,11 +705,11 @@ print(p_pca)
 ## 10) Example Contact Heatmap + scHiCluster Scaled
 
 ```{r example_heatmap_with_schicluster, fig.width=20, fig.height=5.6}
-anchor_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "mm10.genome_split_1M")
-raw_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "oocyte_zygote_mm10", "1M")
-nb_pair_dir  <- path_here("data", "bhzip_score_compare_from_pairs", "bhzip_1M")
-nm_pair_dir  <- path_here("data", "bhzip_score_compare_from_pairs_nm", "bhzip_nm_1M")
-schic_pair_dir <- path_here("data", "schicimpute_score_compare_from_pairs", "schicimpute_1M")
+anchor_path <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "mm10.genome_split_1M")
+raw_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_mm10", "1M")
+nb_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_GB_NB", "bhzip_1M")
+nm_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_NM", "bhzip_nm_1M")
+schic_pair_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "scHiCImpute", "schicimpute_1M")
 schi_cap_quantile <- 0.96
 
 target_chr <- "chr1"
