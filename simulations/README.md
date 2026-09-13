@@ -11,7 +11,7 @@ Ordered public workflow:
 2. Run `03_run_HiCBZIP_GB_NB_simulation.R`.
 3. Run `04_run_HiCBZIP_NGS_simulation.R`.
 4. Run `05_run_HiCBZIP_NM_simulation.R`.
-5. Add processed non-regenerated external benchmark outputs under `data/processed/simulation/`.
+5. Add processed benchmark outputs under `data/processed/simulation/`, or inspect `benchmark_methods/` for the study-specific benchmark-method workflows.
 6. Run `06_prepare_simulation_manuscript_summaries.R`.
 
 Full manuscript-scale simulation workflows require the processed simulation archive listed in `../data/README.md`. The repository includes the scripts and expected paths, while large processed inputs and regenerated outputs are distributed outside Git.
@@ -21,6 +21,8 @@ Included manuscript summary notebooks:
 - `summarize_simulation_metrics.Rmd`
 - `summarize_simulation_clustering.Rmd`
 - `make_simulation_heatmap_panels.Rmd`
+
+Benchmark-method workflows are documented in `benchmark_methods/`. These scripts are separated from the main HiCBZIP workflow so the primary reproduction path remains clear when starting from the archived processed data.
 
 ## SCL preprocessing
 

@@ -22,7 +22,7 @@ The repository is organized to help readers reproduce the main analyses from pro
 
 ## Reproducibility Scope
 
-This release is designed to reproduce manuscript-level results from processed inputs. It includes the HiCBZIP method implementation, final analysis workflows, small test data, and environment records. Exploratory notebooks, large intermediate files, generated figures, and full external-method working directories are excluded.
+This release is designed to reproduce manuscript-level results from processed inputs. It includes the HiCBZIP method implementation, final analysis workflows, small test data, and environment records. Exploratory notebooks, large intermediate files, generated figures, and full benchmark-method working directories are excluded.
 
 ## Run Status
 
@@ -38,7 +38,8 @@ The toy workflow can be run directly from the small example dataset included in 
 - `real_data_NPC_chrX/01_make_NPC_chrX_processed_input.R`
 - `real_data_NPC_chrX/02_run_HiCBZIP_GB_NB_NPC_chrX_all_coverage.R`
 - `real_data_NPC_chrX/03_run_HiCBZIP_NM_NPC_chrX_one_coverage.R`
-- `real_data_NPC_chrX/04_summarize_NPC_chrX_manuscript_metrics.R`
+- `real_data_NPC_chrX/04_build_NPC_chrX_combined_method_object.R`
+- `real_data_NPC_chrX/05_summarize_NPC_chrX_manuscript_metrics.R`
 - `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`
 - `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`
 - `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`
@@ -47,7 +48,7 @@ The toy workflow can be run directly from the small example dataset included in 
 
 See `data/README.md` for the expected processed input layout.
 
-Reserved Zenodo DOI for the processed simulation data archive:
+Reserved Zenodo DOI for the processed manuscript data archive:
 
 ```text
 https://doi.org/10.5281/zenodo.22076528

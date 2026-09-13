@@ -2,7 +2,7 @@
 data {
   int<lower=1> N;         // number of observations
   array[N] int<lower=0> Y;      // observed counts
-  vector<lower=0>[N] lambda;            // CHANGED: per-observation lambda (length N)
+  vector<lower=0>[N] lambda;            // per-observation lambda
   real a_norm;            // mean for log(mu)
   real<lower=0> sigma_mu; // sd for log(mu)
   real b_norm;            // mean for logit(pi)
@@ -23,11 +23,11 @@ model {
   
   // Likelihood: marginalize out S
   for (n in 1:N) {
-    real rate = lambda[n] * mu[n];      // CHANGED: per-observation rate
+    real rate = lambda[n] * mu[n];
     if (Y[n] == 0) {
-      target += log( pi[n] + (1 - pi[n]) * exp(-rate) );   // CHANGED: exp(-lambda[n]*mu[n])
+      target += log( pi[n] + (1 - pi[n]) * exp(-rate) );
     } else {
-      target += log1m(pi[n]) + poisson_lpmf(Y[n] | rate);  // CHANGED: poisson with 'rate'
+      target += log1m(pi[n]) + poisson_lpmf(Y[n] | rate);
     }
   }
 }
@@ -36,11 +36,11 @@ generated quantities {
   array[N] int<lower=0,upper=1> S;
   vector[N] mu_tilde;
   for (n in 1:N) {
-    real rate = lambda[n] * mu[n];      // CHANGED: per-observation rate
+    real rate = lambda[n] * mu[n];
     if (Y[n] > 0)
       S[n] = 0;
     else {
-      real pS1 = pi[n] / (pi[n] + (1 - pi[n]) * exp(-rate));  // CHANGED: exp(-lambda[n]*mu[n])
+      real pS1 = pi[n] / (pi[n] + (1 - pi[n]) * exp(-rate));
       S[n] = bernoulli_rng(pS1);
     }
     mu_tilde[n] = mu[n] * (1 - S[n]);

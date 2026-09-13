@@ -63,12 +63,12 @@ Purpose: reproduce the downstream cell-state separation benchmark using SCORE.
 
 Steps:
 
-1. Put SCORE processed inputs under `data/processed/SCORE_oocyte_zygote/`.
+1. Put SCORE processed inputs under `data/processed/SCORE_oocyte_zygote/source_inputs/`.
    - `oocyte_zygote_mm10/1M/`
    - `mm10.genome_split_1M`
    - `oocyte_zygote_ref`
 2. Run `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`.
-   - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) `.scool` inputs.
+   - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) `.scool` inputs under `data/processed/SCORE_oocyte_zygote/score_ready_inputs/`.
 3. Build or provide the processed scHiCImpute `.scool` input.
    - The study-specific script is `real_data_SCORE_oocyte_zygote/benchmark_methods/01_build_scHiCImpute_SCORE_inputs.R`.
 4. Run `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`.
