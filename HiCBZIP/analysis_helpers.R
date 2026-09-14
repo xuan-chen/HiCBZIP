@@ -463,8 +463,10 @@ fit_TopDom = function(mat_long, start, end, resolution){
     to.coord = seq(start+resolution, end, by = resolution)
   )
   muS_mtx_2D = cbind(muS_mtx_2D, matrix_long_to_matrix2D_offdiag(mat_long))
-  write.table(muS_mtx_2D, file = "temp.txt", sep = " ", row.names = F, col.names = F)
-  data_true_muS <- readHiC("temp.txt")
+  tmp_hic <- tempfile(fileext = ".txt")
+  on.exit(unlink(tmp_hic), add = TRUE)
+  write.table(muS_mtx_2D, file = tmp_hic, sep = " ", row.names = F, col.names = F)
+  data_true_muS <- readHiC(tmp_hic)
   fit <- TopDom(data_true_muS, window.size = 5L)
   return(fit)
 }

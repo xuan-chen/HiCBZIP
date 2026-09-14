@@ -10,13 +10,6 @@
 # library(magrittr)
 # library(cmdstanr)
 
-# log
-## 26/01/11
-#### 1. Fixed max->pmax in ebe$b in get_EBE_ZNB_Gamma_Beta
-#### 2. Swith b_vec to b_mat in run_BZIP_GB_NB
-
-
-
 # Objective and EBE Estimation Functions (Method of Moments on nonzero data)
 objective <- function(params, ybar, svar) {
   a <- params[1]

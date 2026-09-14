@@ -6,8 +6,10 @@ Run the toy example from the `code_clean` root:
 source("examples/run_toy_all_HiCBZIP_variants.R")
 ```
 
-The script loads `data/toy_chr5_diag20_cells8_lambda0.2.rds`, runs all three
-HiCBZIP variants, and saves outputs in this folder:
+The script uses `data/toy_chr5_diag20_cells8_lambda0.2.rds` if that file is
+present. Otherwise, it generates a deterministic 20-bin, 8-cell toy matrix in
+memory. It then runs all three HiCBZIP variants and saves outputs in this
+folder:
 
 ```text
 toy_raw_observed_cells8_heatmaps.png
