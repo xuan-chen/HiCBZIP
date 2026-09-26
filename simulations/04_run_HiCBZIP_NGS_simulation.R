@@ -16,8 +16,8 @@
 #   HICBZIP_SIM_OUTPUT_DIR      Override output directory.
 #   HICBZIP_SIM_COVERAGES       Comma-separated coverages; default manuscript grid.
 #   HICBZIP_SIM_TARGET_CHR      Run one chromosome only, e.g. "1" or "chr1".
-#   HICBZIP_STAN_WARMUP         CmdStan warmup iterations; default 250.
-#   HICBZIP_STAN_SAMPLING       CmdStan sampling iterations; default 250.
+#   HICBZIP_STAN_WARMUP         CmdStan warmup iterations; default 500.
+#   HICBZIP_STAN_SAMPLING       CmdStan sampling iterations; default 500.
 #   HICBZIP_STAN_CHAINS         CmdStan chains; default 2.
 
 script_arg <- commandArgs(FALSE)[grep("^--file=", commandArgs(FALSE))]
@@ -45,8 +45,8 @@ lambda_list <- as.numeric(strsplit(
   fixed = TRUE
 )[[1]])
 
-iter_warmup <- as.integer(Sys.getenv("HICBZIP_STAN_WARMUP", unset = "250"))
-iter_sampling <- as.integer(Sys.getenv("HICBZIP_STAN_SAMPLING", unset = "250"))
+iter_warmup <- as.integer(Sys.getenv("HICBZIP_STAN_WARMUP", unset = "500"))
+iter_sampling <- as.integer(Sys.getenv("HICBZIP_STAN_SAMPLING", unset = "500"))
 chains <- as.integer(Sys.getenv("HICBZIP_STAN_CHAINS", unset = "2"))
 parallel_chains <- chains
 

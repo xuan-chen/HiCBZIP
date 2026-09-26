@@ -16,6 +16,8 @@ Ordered public workflow:
 
 Full manuscript-scale simulation workflows require the processed simulation archive listed in `../data/README.md`. The repository includes the scripts and expected paths, while large processed inputs and regenerated outputs are distributed outside Git.
 
+Manuscript-scale MCMC settings are two chains with 500 warmup and 500 sampling iterations per chain for HiCBZIP-N(GS), and one chain per locus pair with 500 warmup and 500 sampling iterations for HiCBZIP-N(M). The environment variables documented in the run scripts can override these defaults.
+
 Included manuscript summary notebooks:
 
 - `summarize_simulation_metrics.Rmd`
