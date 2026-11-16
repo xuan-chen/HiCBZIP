@@ -57,11 +57,13 @@ require_packages <- function(pkgs) {
 source_hicbzip_core <- function(include_score_helpers = FALSE, include_embedding_helpers = FALSE) {
   require_files(c(
     path_here("HiCBZIP", "analysis_helpers.R"),
-    path_here("HiCBZIP", "BHZIP_EB.R")
+    path_here("HiCBZIP", "BHZIP_EB.R"),
+    path_here("HiCBZIP", "BHZIP_EB_cell_specific.R")
   ), label = "HiCBZIP core source")
 
   source(path_here("HiCBZIP", "analysis_helpers.R"))
   source(path_here("HiCBZIP", "BHZIP_EB.R"))
+  source(path_here("HiCBZIP", "BHZIP_EB_cell_specific.R"))
 
   if (include_score_helpers) {
     require_files(path_here("_common", "score_io_helpers.R"), label = "SCORE helper source")

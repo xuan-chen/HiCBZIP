@@ -54,7 +54,7 @@ fit_one_row <- function(i) {
   data_i <- list(
     N = K,
     Y = Y_sim,
-    lambda = lambda_by_row[i],
+    lambda = rep(coverage, K),
     a_norm = log(ebe$a / ebe$b),
     sigma_mu = sqrt(1 / ebe$a),
     b_norm = ifelse(ebe$c == 0, -1e4, ifelse(ebe$d == 0, 1e4, log(ebe$c / ebe$d))),
