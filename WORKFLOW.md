@@ -63,20 +63,17 @@ Purpose: reproduce the downstream cell-state separation benchmark using SCORE.
 
 Steps:
 
-1. Put SCORE processed inputs under `data/processed/SCORE_oocyte_zygote/source_inputs/`.
-   - `oocyte_zygote_mm10/1M/`
-   - `mm10.genome_split_1M`
-   - `oocyte_zygote_ref`
+1. Provide the SCORE raw pairs, 1 Mb anchors, cell reference, and raw SCORE QC table. See the [study README](real_data_SCORE_oocyte_zygote/README.md) for the input paths.
 2. Run `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`.
-   - Builds Raw, HiCBZIP-GB/GB(NB), and HiCBZIP-N(M) `.scool` inputs under `data/processed/SCORE_oocyte_zygote/score_ready_inputs/`.
-3. Build or provide the processed scHiCImpute `.scool` input.
-   - The study-specific script is `real_data_SCORE_oocyte_zygote/benchmark_methods/01_build_scHiCImpute_SCORE_inputs.R`.
-4. Run `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`.
-   - Runs InnerProduct and SnapATAC/no-IDF over Raw, HiCBZIP-GB/GB(NB), HiCBZIP-N(M), and scHiCImpute.
-5. Run or provide processed metric JSON folders for integrated benchmark methods.
-   - Study-specific scripts for scHiCluster, Higashi, and Fast-Higashi are in `real_data_SCORE_oocyte_zygote/benchmark_methods/`.
-6. Run `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`.
-   - Renders the final SCORE metric summary workflow.
+   - Selects the fixed 150-cell cohort, computes whole-cell exposures, and fits HiCBZIP-GB(NB).
+3. Run `real_data_SCORE_oocyte_zygote/build_SCORE_HiCBZIP_NM_inputs.R` on Linux with CmdStan configured.
+   - Uses the saved GB(NB) hyperparameters and whole-cell exposures to fit HiCBZIP-N(M).
+4. Provide the saved HiCImpute pair files and run `real_data_SCORE_oocyte_zygote/04_prepare_fixed150_depth_matched.R`.
+   - Writes continuous inputs for InnerProduct and integer inputs for SnapATAC. HiCImpute uses its 146 nonempty outputs.
+5. Run `real_data_SCORE_oocyte_zygote/05_run_fixed150_depth_matched_score.sh` in the SCORE environment.
+   - Runs both embedding workflows with ten seeds for each imputation method.
+6. Provide the saved Raw and integrated SCORE results, then render `real_data_SCORE_oocyte_zygote/06_summarize_fixed150_manuscript.Rmd`.
+   - Generates the manuscript metric summaries and PCA panels.
 
 ## Files Excluded From Git
 

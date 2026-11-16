@@ -41,8 +41,10 @@ The toy workflow can be run directly from the small example dataset included in 
 - `real_data_NPC_chrX/04_build_NPC_chrX_combined_method_object.R`
 - `real_data_NPC_chrX/05_summarize_NPC_chrX_manuscript_metrics.R`
 - `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R`
-- `real_data_SCORE_oocyte_zygote/02_run_SCORE_embeddings.R`
-- `real_data_SCORE_oocyte_zygote/03_summarize_SCORE_manuscript_metrics.R`
+- `real_data_SCORE_oocyte_zygote/build_SCORE_HiCBZIP_NM_inputs.R`
+- `real_data_SCORE_oocyte_zygote/04_prepare_fixed150_depth_matched.R`
+- `real_data_SCORE_oocyte_zygote/05_run_fixed150_depth_matched_score.sh`
+- `real_data_SCORE_oocyte_zygote/06_summarize_fixed150_manuscript.Rmd`
 
 ## Required Inputs
 
