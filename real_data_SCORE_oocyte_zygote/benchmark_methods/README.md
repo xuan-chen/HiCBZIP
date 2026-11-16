@@ -4,7 +4,8 @@ This folder contains study-specific benchmark-method workflows for real-data stu
 
 ## Inputs
 
-Run `real_data_SCORE_oocyte_zygote/01_build_SCORE_HiCBZIP_inputs.R` first, or provide equivalent SCORE-ready files at:
+The paths below are inputs for the earlier SCORE workflow. The fixed-cohort
+fitting scripts do not generate these files.
 
 ```text
 data/processed/SCORE_oocyte_zygote/score_ready_inputs/HiCBZIP_GB_NB/oocyte_zygote_raw_1M.scool

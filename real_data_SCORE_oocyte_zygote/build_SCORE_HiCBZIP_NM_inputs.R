@@ -1,399 +1,396 @@
-# score_tutorial_1_innerproduct_bhzip_nm_compare.R
-# Server-first script: build HiCBZIP-N(M) imputed pairs and .scool for SCORE benchmarking.
-# Run: Rscript score_tutorial_1_innerproduct_bhzip_nm_compare.R
+# Fit fixed-cohort N(M) from the GB(NB) hyperparameters and whole-cell exposure.
+# Run on Linux with CmdStan configured in cmdstanr. Outputs remain unrounded.
+script_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))) else getwd()
+source(file.path(script_dir, "..", "_common", "project_paths.R"))
 
-required_pkgs <- c("dplyr", "tibble", "jsonlite", "cmdstanr", "parallel")
-missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing_pkgs) > 0) stop("Missing R packages: ", paste(missing_pkgs, collapse = ", "))
+out_dir <- Sys.getenv("HICBZIP_SCORE_FIXED150_OUTPUT", path_here("results", "SCORE_oocyte_zygote", "fixed150"))
+input_dir <- file.path(out_dir, "gbnb_fits")
+metadata_file <- file.path(out_dir, "metadata", "whole_cell_coverage.csv")
+stan_file <- path_here("HiCBZIP", "BHZIP_match_normal.stan")
+all_chromosomes <- c(paste0("chr", 1:19), "chrX", "chrY")
+chromosome_setting <- Sys.getenv("HICBZIP_NM_CHROMOSOMES", "all")
+chromosomes <- if (chromosome_setting == "all") all_chromosomes else trimws(strsplit(chromosome_setting, ",", fixed = TRUE)[[1]])
+stopifnot(length(chromosomes) > 0L, !anyDuplicated(chromosomes), all(chromosomes %in% all_chromosomes))
+require_files(c(metadata_file, stan_file, file.path(input_dir, paste0(chromosomes, ".rds"))),
+              label = "fixed-cohort GB(NB) inputs")
+cohort <- read.csv(metadata_file, stringsAsFactors = FALSE)
+stopifnot(nrow(cohort) == 150L, !anyDuplicated(cohort$cell_file))
 
-library(dplyr)
-library(tibble)
-library(jsonlite)
-library(cmdstanr)
-library(parallel)
-
-if (!exists("path_here", mode = "function")) {
-  script_arg <- commandArgs(FALSE)[grep("^--file=", commandArgs(FALSE))]
-  script_dir <- if (length(script_arg)) dirname(normalizePath(sub("^--file=", "", script_arg[[1]]), winslash = "/", mustWork = FALSE)) else getwd()
-  source(file.path(script_dir, "..", "_common", "project_paths.R"))
-}
-source_hicbzip_core(include_score_helpers = TRUE)
-
-score_bin <- Sys.which("score")
-if (!nzchar(score_bin)) {
-  fallback_candidates <- c(Sys.getenv("HICBZIP_SCORE_BIN", unset = ""))
-  existing <- fallback_candidates[file.exists(fallback_candidates)]
-  if (length(existing) > 0) score_bin <- existing[[1]]
-}
-if (!nzchar(score_bin)) stop("`score` command not found.")
-
-raw_data_dir <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_mm10", "1M")
-anchor_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "mm10.genome_split_1M")
-ref_file <- path_here("data", "processed", "SCORE_oocyte_zygote", "source_inputs", "oocyte_zygote_ref")
-if (!dir.exists(raw_data_dir)) stop("Missing raw pair dir: ", raw_data_dir)
-if (!file.exists(anchor_file)) stop("Missing anchor file: ", anchor_file)
-if (!file.exists(ref_file)) stop("Missing reference file: ", ref_file)
-
+cores <- parallel::detectCores()
+default_workers <- if (is.finite(cores)) max(1L, cores - 2L) else 1L
+workers <- suppressWarnings(as.integer(Sys.getenv("HICBZIP_NM_WORKERS", as.character(default_workers))))
+stopifnot(is.finite(workers), workers >= 1L)
 cfg <- list(
-  min_depth = 5000,
-  nm_r = 1,
-  nm_threshold = 2,
-  nm_B = 10,
-  include_diag = TRUE,
-  iter_warmup = 500,
-  iter_sampling = 500,
-  chains = 1,
-  threads_per_chain = 1,
-  workers = max(1L, parallel::detectCores() - 2L),
-  seed = 123456L,
-  force_rebuild_raw_scool = FALSE,
-  force_rerun_nm = TRUE,
-  chr_subset = character(0)
+  chromosomes = chromosomes, prior_mapping = "delta_method",
+  iter_warmup = 500L, iter_sampling = 500L, chains = 1L,
+  threads_per_chain = 1L, workers = workers, seed = 123456L, block_size = 1000L
 )
 
-stan_file <- Sys.getenv("HICBZIP_NM_STAN_FILE", unset = path_here("HiCBZIP", "BHZIP_match_normal.stan"))
-if (!file.exists(stan_file)) stop("Stan file not found. Set HICBZIP_NM_STAN_FILE. Current: ", stan_file)
+if (.Platform$OS.type == "windows") stop("Run the fixed-cohort N(M) fit on Linux.")
+require_packages("cmdstanr")
+output_dir <- ensure_dir(file.path(out_dir, "nm_fits"))
+block_dir <- ensure_dir(file.path(output_dir, "blocks"))
 
-# Warning capture (persistent log + snapshot)
-log_root <- path_here("results", "SCORE_oocyte_zygote", "input_build_logs")
-ensure_dir(log_root)
-warning_log_file <- file.path(log_root, "warnings_nm.log")
-warning_snapshot_file <- file.path(log_root, "warnings_last50_snapshot.log")
-if (file.exists(warning_log_file)) file.remove(warning_log_file)
-if (file.exists(warning_snapshot_file)) file.remove(warning_snapshot_file)
-
-log_warning <- function(w) {
-  msg <- conditionMessage(w)
-  cat(
-    format(Sys.time(), "%F %T"),
-    " | ", msg, "\n",
-    file = warning_log_file, append = TRUE, sep = ""
+# ---- prior_mapping_functions ----
+map_gbnb_prior <- function(a, b, c, d) {
+  stopifnot(
+    length(a) == 1L, length(b) == 1L,
+    is.finite(a), is.finite(b), a > 0, b > 0,
+    is.finite(c), is.finite(d), c >= 0, d >= 0
   )
-  invokeRestart("muffleWarning")
-}
 
-save_warning_snapshot <- function() {
-  w <- warnings()
-  if (!is.null(w)) capture.output(w, file = warning_snapshot_file)
-}
+  # Delta-method mapping used by the original N(M) implementation.
+  mu_mean <- log(a / b)
+  mu_sd <- sqrt(1 / a)
 
-run_score_cmd <- function(args, label) {
-  cat("\n[", label, "]\n", sep = "")
-  cat("score ", paste(args, collapse = " "), "\n", sep = "")
-  stdout_file <- tempfile(fileext = ".log")
-  stderr_file <- tempfile(fileext = ".log")
-  status <- system2(score_bin, args = args, stdout = stdout_file, stderr = stderr_file)
-  out <- if (file.exists(stdout_file)) readLines(stdout_file, warn = FALSE) else character(0)
-  err <- if (file.exists(stderr_file)) readLines(stderr_file, warn = FALSE) else character(0)
-  cat("Return code:", status, "\n")
-  if (length(out) > 0) cat(paste(out, collapse = "\n"), "\n")
-  if (!identical(status, 0L)) {
-    cat("\n--- STDERR ---\n")
-    if (length(err) > 0) cat(paste(err, collapse = "\n"), "\n")
-    stop(label, " failed.")
+  if (c == 0) {
+    pi_mean <- -1e4
+    pi_sd <- 1e-4
+    pi_boundary <- "sampling-zero"
+  } else if (d == 0) {
+    pi_mean <- 1e4
+    pi_sd <- 1e-4
+    pi_boundary <- "structural-zero"
+  } else {
+    pi_mean <- log(c / d)
+    pi_sd <- sqrt((c + d)^2 / (c * d * (c + d + 1)))
+    pi_boundary <- "interior"
   }
+
+  result <- c(
+    mu_mean = mu_mean,
+    mu_sd = mu_sd,
+    pi_mean = pi_mean,
+    pi_sd = pi_sd
+  )
+  stopifnot(all(is.finite(result)), mu_sd > 0, pi_sd > 0)
+  list(values = result, pi_boundary = pi_boundary)
 }
 
-normalize_key <- function(x) {
-  x <- tolower(as.character(x))
-  x <- gsub("\\.1m$", "", x, ignore.case = TRUE)
-  x
-}
 
-read_pair_file <- function(path) {
-  if (!file.exists(path) || file.info(path)$size == 0) {
-    return(data.frame(bin1 = integer(0), bin2 = integer(0), count = numeric(0)))
-  }
-  x <- tryCatch(read.table(path, sep = "\t", header = FALSE, stringsAsFactors = FALSE), error = function(e) data.frame())
-  if (nrow(x) == 0 || ncol(x) < 3) return(data.frame(bin1 = integer(0), bin2 = integer(0), count = numeric(0)))
-  x <- x[, 1:3]
-  colnames(x) <- c("bin1", "bin2", "count")
-  x$bin1 <- as.integer(x$bin1)
-  x$bin2 <- as.integer(x$bin2)
-  x$count <- as.numeric(x$count)
-  x <- x[!is.na(x$bin1) & !is.na(x$bin2) & !is.na(x$count), , drop = FALSE]
-  x
-}
+# ---- compile_stan ----
+Sys.setenv(
+  OMP_NUM_THREADS = "1",
+  MKL_NUM_THREADS = "1",
+  OPENBLAS_NUM_THREADS = "1",
+  VECLIB_MAXIMUM_THREADS = "1"
+)
 
-write_imputed_chr <- function(v, out_file, global_ids) {
-  n_bins <- length(global_ids)
-  idx <- 1L
-  chunks <- vector("list", n_bins)
-  n_chunks <- 0L
-  vals <- as.numeric(v)
-  vals[!is.finite(vals)] <- 0
-  for (i in seq_len(n_bins)) {
-    jv <- i:n_bins
-    len <- length(jv)
-    seg <- vals[idx:(idx + len - 1L)]
-    seg[!is.finite(seg)] <- 0
-    seg <- round(seg)
-    keep <- !is.na(seg) & seg > 0
-    if (any(keep)) {
-      n_chunks <- n_chunks + 1L
-      chunks[[n_chunks]] <- data.frame(
-        bin1 = global_ids[i],
-        bin2 = global_ids[jv[keep]],
-        count = as.integer(seg[keep]),
-        stringsAsFactors = FALSE
-      )
-    }
-    idx <- idx + len
-  }
-  if (n_chunks > 0L) {
-    out <- do.call(rbind, chunks[seq_len(n_chunks)])
-    write.table(out, file = out_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE, append = TRUE)
-  }
-}
+mod <- cmdstanr::cmdstan_model(
+  stan_file,
+  cpp_options = list(stan_threads = TRUE)
+)
 
-fit_nm_chr <- function(Y_chr, coverage_chr, cfg, mod) {
-  N <- nrow(Y_chr)
-  K <- ncol(Y_chr)
-  n_bins <- as.integer((-1 + sqrt(1 + 8 * N)) / 2)
-  if (n_bins * (n_bins + 1) / 2 != N) stop("N pairs mismatch while fitting N(M).")
 
-  list_neighbor_id <- get_neighbor_id(n_bins, r = cfg$nm_r, include_diag = cfg$include_diag)
-  lambda_by_row <- rep(mean(coverage_chr), N)
+# ---- fitting_functions ----
+fit_one_nm_pair <- function(pair_id, input, cfg, mod) {
+  hp <- input$hyperparameters[pair_id, , drop = FALSE]
+  y <- as.integer(input$Y[pair_id, ])
 
-  fit_one_row <- function(i) {
-    Y_sim <- Y_chr[i, ]
-    if (sum(Y_sim > 0) > cfg$nm_threshold) {
-      Y_input <- Y_sim
-    } else {
-      Y_input <- as.vector(Y_chr[list_neighbor_id[[i]], , drop = FALSE])
-    }
-
-    ebe <- get_EBE_ZNB_Gamma_Beta(Y_input, cfg$nm_B, lambda_by_row[i], fix_negative_w = TRUE)
-    a_hat <- ebe$a
-    b_hat <- ebe$b
-    c_hat <- ebe$c
-    d_hat <- ebe$d
-
-    a_norm <- log(a_hat / b_hat)
-    sigma_mu <- sqrt(1 / a_hat)
-    b_norm <- ifelse(c_hat == 0, -1e4, ifelse(d_hat == 0, 1e4, log(c_hat / d_hat)))
-    sigma_pi <- ifelse(c_hat == 0 | d_hat == 0, 1e-4,
-                       sqrt((c_hat + d_hat)^2 / (c_hat * d_hat * (c_hat + d_hat + 1))))
-
-    data_i <- list(
-      N = K,
-      Y = Y_sim,
-      lambda = coverage_chr,
-      a_norm = a_norm,
-      sigma_mu = sigma_mu,
-      b_norm = b_norm,
-      sigma_pi = sigma_pi
+  # Forked workers inherit the same R tempdir(). Give each pair its own
+  # CmdStan output directory so one worker cannot remove another worker's CSV.
+  pair_output_dir <- file.path(
+    output_dir,
+    "_cmdstan_tmp",
+    paste0(
+      input$chromosome, "_pair_", sprintf("%06d", pair_id),
+      "_pid_", Sys.getpid()
     )
+  )
+  dir.create(pair_output_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(pair_output_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
-    fit <- tryCatch(
-      suppressMessages(
-        mod$sample(
-          data = data_i,
-          seed = cfg$seed + i,
-          chains = cfg$chains,
-          parallel_chains = cfg$chains,
-          threads_per_chain = cfg$threads_per_chain,
-          iter_warmup = cfg$iter_warmup,
-          iter_sampling = cfg$iter_sampling,
-          refresh = 0,
-          show_messages = FALSE,
-          output_dir = tempdir()
-        )
+  if (hp$c == 0 && hp$d == 0) {
+    stop("Invalid Beta boundary at pair ", pair_id)
+  }
+
+  prior <- map_gbnb_prior(hp$a, hp$b, hp$c, hp$d)
+
+  if (identical(prior$pi_boundary, "structural-zero")) {
+    return(list(
+      pair_id = pair_id,
+      mean = rep(0, length(y)),
+      min_ess_bulk = NA_real_,
+      max_mcse_mean = NA_real_,
+      prior = prior$values,
+      fit_status = "structural-zero-boundary",
+      error = NA_character_
+    ))
+  }
+
+  data_i <- list(
+    N = length(y),
+    Y = y,
+    lambda = as.numeric(input$lambda),
+    a_norm = unname(prior$values["mu_mean"]),
+    sigma_mu = unname(prior$values["mu_sd"]),
+    b_norm = unname(prior$values["pi_mean"]),
+    sigma_pi = unname(prior$values["pi_sd"])
+  )
+
+  tryCatch({
+    fit <- suppressMessages(mod$sample(
+      data = data_i,
+      seed = cfg$seed + pair_id,
+      chains = cfg$chains,
+      parallel_chains = cfg$chains,
+      threads_per_chain = cfg$threads_per_chain,
+      iter_warmup = cfg$iter_warmup,
+      iter_sampling = cfg$iter_sampling,
+      refresh = 0,
+      show_messages = FALSE,
+      output_dir = pair_output_dir
+    ))
+
+    summary_mu <- fit$summary(variables = "mu_tilde")
+
+    list(
+      pair_id = pair_id,
+      mean = as.numeric(summary_mu$mean),
+      min_ess_bulk = if ("ess_bulk" %in% names(summary_mu)) {
+        suppressWarnings(min(summary_mu$ess_bulk, na.rm = TRUE))
+      } else {
+        NA_real_
+      },
+      max_mcse_mean = if ("mcse_mean" %in% names(summary_mu)) {
+        suppressWarnings(max(summary_mu$mcse_mean, na.rm = TRUE))
+      } else {
+        NA_real_
+      },
+      prior = prior$values,
+      fit_status = "mcmc",
+      error = NA_character_
+    )
+  }, error = function(e) {
+    list(
+      pair_id = pair_id,
+      mean = rep(NA_real_, length(y)),
+      min_ess_bulk = NA_real_,
+      max_mcse_mean = NA_real_,
+      prior = prior$values,
+      fit_status = "error",
+      error = conditionMessage(e)
+    )
+  })
+}
+
+fit_nm_chromosome <- function(chr_name, cfg, mod) {
+  input_file <- file.path(
+    input_dir, paste0(chr_name, ".rds")
+  )
+  stopifnot(file.exists(input_file))
+  input <- readRDS(input_file)
+  stopifnot(
+    identical(input$chromosome, chr_name),
+    nrow(input$Y) == nrow(input$hyperparameters),
+    ncol(input$Y) == length(input$lambda),
+    all(input$hyperparameters$valid),
+    identical(colnames(input$Y), cohort$cell_file),
+    isTRUE(all.equal(input$lambda, cohort$lambda_k, tolerance = 1e-14)),
+    identical(as.numeric(input$D_k), as.numeric(cohort$D_k)),
+    all(is.finite(input$lambda)),
+    all(input$lambda > 0),
+    abs(sum(input$lambda) - 1) < 1e-12
+  )
+
+  final_file <- file.path(output_dir, paste0(chr_name, ".rds"))
+  checkpoint_key <- list(
+    input_md5 = unname(tools::md5sum(input_file)),
+    stan_md5 = unname(tools::md5sum(stan_file)),
+    sampler = cfg[c("prior_mapping", "iter_warmup", "iter_sampling",
+                    "chains", "threads_per_chain", "seed", "block_size")]
+  )
+  read_checkpoint <- function(path) {
+    result <- readRDS(path)
+    if (!identical(result$checkpoint_key, checkpoint_key)) {
+      stop("Stale N(M) checkpoint: ", path,
+           ". Use a fresh output directory or move aside this chromosome's old fits.")
+    }
+    result
+  }
+  if (file.exists(final_file)) return(read_checkpoint(final_file))
+
+  n_pairs <- nrow(input$Y)
+  n_cells <- ncol(input$Y)
+
+  if (isTRUE(input$empty_chromosome)) {
+    result <- list(
+      chromosome = chr_name,
+      imputed = matrix(0, n_pairs, n_cells, dimnames = dimnames(input$Y)),
+      diagnostics = data.frame(
+        pair_id = seq_len(n_pairs), fit_status = "empty-chromosome",
+        min_ess_bulk = NA_real_, max_mcse_mean = NA_real_,
+        error = NA_character_
       ),
-      error = function(e) e
+      prior_mapping = cfg$prior_mapping,
+      settings = cfg,
+      checkpoint_key = checkpoint_key
+    )
+    saveRDS(result, final_file, compress = "gzip")
+    return(result)
+  }
+
+  block_starts <- seq.int(1L, n_pairs, by = cfg$block_size)
+  for (block_index in seq_along(block_starts)) {
+    first <- block_starts[block_index]
+    last <- min(n_pairs, first + cfg$block_size - 1L)
+    ids <- first:last
+    block_file <- file.path(
+      block_dir,
+      paste0(
+        chr_name, "_", cfg$prior_mapping, "_fixed150_pairs_",
+        sprintf("%06d", first), "_", sprintf("%06d", last), ".rds"
+      )
     )
 
-    if (inherits(fit, "error")) {
-      warning(sprintf("CmdStan fit failed at row %d: %s", i, conditionMessage(fit)))
-      return(rep(NA_real_, K))
+    if (file.exists(block_file)) {
+      stopifnot(identical(read_checkpoint(block_file)$pair_ids, ids))
+      cat(chr_name, ": block", first, "to", last, "already exists; skipping.\n")
+      next
     }
 
-    mu_tilde <- tryCatch(
-      fit$summary(variables = "mu_tilde")$mean,
-      error = function(e) numeric(0)
+    cat(chr_name, ": fitting pairs", first, "to", last, "of", n_pairs, "...\n")
+    started <- Sys.time()
+    fits <- parallel::mclapply(
+      ids,
+      fit_one_nm_pair,
+      input = input,
+      cfg = cfg,
+      mod = mod,
+      mc.cores = cfg$workers,
+      mc.preschedule = TRUE
     )
 
-    if (length(mu_tilde) != K) {
-      warning(sprintf(
-        "mu_tilde length mismatch at row %d: got %d, expected %d; padding with NA",
-        i, length(mu_tilde), K
-      ))
-      out <- rep(NA_real_, K)
-      if (length(mu_tilde) > 0) out[seq_len(min(length(mu_tilde), K))] <- as.numeric(mu_tilde[seq_len(min(length(mu_tilde), K))])
-      return(out)
-    }
-
-    as.numeric(mu_tilde)
-  }
-
-  Sys.setenv(OMP_NUM_THREADS = "1", MKL_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", VECLIB_MAXIMUM_THREADS = "1")
-  res_list <- withCallingHandlers(
-    parallel::mclapply(seq_len(N), fit_one_row, mc.cores = cfg$workers, mc.preschedule = TRUE),
-    warning = log_warning
-  )
-  out_mat <- do.call(rbind, lapply(res_list, function(v) as.numeric(v)))
-  if (!is.matrix(out_mat)) out_mat <- matrix(as.numeric(out_mat), ncol = K, byrow = TRUE)
-  if (ncol(out_mat) != K) {
-    warning(sprintf("Final imputation matrix column mismatch: got %d, expected %d; coercing shape", ncol(out_mat), K))
-    out_tmp <- matrix(NA_real_, nrow = N, ncol = K)
-    rr <- min(nrow(out_mat), N)
-    cc <- min(ncol(out_mat), K)
-    out_tmp[seq_len(rr), seq_len(cc)] <- out_mat[seq_len(rr), seq_len(cc), drop = FALSE]
-    out_mat <- out_tmp
-  }
-  out_mat
-}
-
-set.seed(cfg$seed)
-cat("score path:", score_bin, "\n")
-cat("stan file:", stan_file, "\n")
-
-ref <- read.delim(ref_file, sep = "\t", header = TRUE, stringsAsFactors = FALSE)
-if (!all(c("cell", "depth", "cluster") %in% names(ref))) stop("Reference must include: cell, depth, cluster")
-
-pair_files <- list.files(raw_data_dir, full.names = FALSE)
-pair_files <- pair_files[!grepl("\\.tmp$", pair_files)]
-pair_tbl <- tibble(cell_file = pair_files, key = normalize_key(pair_files))
-
-ref2 <- ref %>%
-  filter(!is.na(cell), !is.na(cluster), !is.na(depth), depth >= cfg$min_depth) %>%
-  mutate(key = normalize_key(cell)) %>%
-  left_join(pair_tbl, by = "key") %>%
-  filter(!is.na(cell_file)) %>%
-  distinct(cell_file, .keep_all = TRUE)
-if (nrow(ref2) < 2) stop("Too few matched cells after filtering.")
-
-ref_subset <- ref2 %>%
-  transmute(cell = cell,
-            depth = depth,
-            batch = if ("batch" %in% names(ref2)) batch else 1,
-            cluster = cluster)
-
-out_root <- path_here("data", "processed", "SCORE_oocyte_zygote", "score_ready_inputs", "HiCBZIP_NM")
-dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
-ref_subset_file <- file.path(out_root, "oocyte_zygote_ref_min_depth_5000.tsv")
-write.table(ref_subset, ref_subset_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
-
-raw_scool <- file.path(out_root, "oocyte_zygote_raw_1M.scool")
-if (cfg$force_rebuild_raw_scool || !file.exists(raw_scool)) {
-  run_score_cmd(c(
-    "cooler",
-    "--dset", "oocyte_zygote_raw_nm",
-    "--data_dir", raw_data_dir,
-    "--anchor_file", anchor_file,
-    "--reference", ref_subset_file,
-    "--resolution", "1M",
-    "--out", raw_scool
-  ), "score cooler raw (nm workspace)")
-}
-
-imp_dir <- file.path(out_root, "bhzip_nm_1M")
-dir.create(imp_dir, recursive = TRUE, showWarnings = FALSE)
-for (cid in ref2$cell_file) {
-  fout <- file.path(imp_dir, cid)
-  if (file.exists(fout)) file.remove(fout)
-  file.create(fout)
-}
-
-anchors <- read.delim(anchor_file, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
-colnames(anchors) <- c("chr", "start", "end", "idx0")
-all_chr <- unique(anchors$chr)
-if (length(cfg$chr_subset) > 0) all_chr <- intersect(all_chr, cfg$chr_subset)
-if (length(all_chr) == 0) stop("No chromosomes selected for imputation.")
-
-mod <- cmdstan_model(stan_file, cpp_options = list(stan_threads = TRUE))
-
-run_start <- Sys.time()
-chr_elapsed <- numeric(0)
-total_chr <- length(all_chr)
-
-for (chr_idx in seq_along(all_chr)) {
-  chr_name <- all_chr[[chr_idx]]
-  chr_start <- Sys.time()
-  cat(
-    "\n[", chr_idx, "/", total_chr, "] Processing ", chr_name, " for HiCBZIP-N(M)...\n",
-    sep = ""
-  )
-  chr_ids <- anchors$idx0[anchors$chr == chr_name]
-  n_bins <- length(chr_ids)
-  if (n_bins < 2) {
-    cat("Skipped ", chr_name, " (n_bins < 2)\n", sep = "")
-    next
-  }
-
-  n_pairs <- as.integer(n_bins * (n_bins + 1) / 2)
-  cat("n_bins=", n_bins, " | n_pairs=", n_pairs, "\n", sep = "")
-  old2new <- integer(max(anchors$idx0) + 1L)
-  old2new[chr_ids + 1L] <- seq_len(n_bins)
-
-  Y_chr <- matrix(0, nrow = n_pairs, ncol = nrow(ref2))
-  colnames(Y_chr) <- ref2$cell_file
-
-  for (k in seq_len(nrow(ref2))) {
-    f <- file.path(raw_data_dir, ref2$cell_file[k])
-    dt <- read_pair_file(f)
-    if (nrow(dt) == 0) next
-
-    in_chr <- dt$bin1 %in% chr_ids & dt$bin2 %in% chr_ids
-    if (!any(in_chr)) next
-    d <- dt[in_chr, , drop = FALSE]
-    i <- old2new[d$bin1 + 1L]
-    j <- old2new[d$bin2 + 1L]
-    ii <- pmin(i, j)
-    jj <- pmax(i, j)
-    rid <- upper_tri_rowmajor_id(ii, jj, n_bins)
-    s <- tapply(d$count, rid, sum)
-    Y_chr[as.integer(names(s)), k] <- as.numeric(s)
-  }
-
-  withCallingHandlers({
-    coverage_chr <- compute_bulk_referenced_coverage(Y_chr)$coverage
-    Y_imp_chr <- fit_nm_chr(Y_chr, coverage_chr = coverage_chr, cfg = cfg, mod = mod)
-    colnames(Y_imp_chr) <- colnames(Y_chr)
-
-    for (k in seq_len(ncol(Y_imp_chr))) {
-      write_imputed_chr(
-        v = Y_imp_chr[, k],
-        out_file = file.path(imp_dir, colnames(Y_imp_chr)[k]),
-        global_ids = chr_ids
+    if (any(!vapply(fits, is.list, logical(1)))) stop("An N(M) worker exited without a fit.")
+    errors <- vapply(fits, function(x) !is.na(x$error), logical(1))
+    if (any(errors)) {
+      failed <- vapply(fits[errors], `[[`, integer(1), "pair_id")
+      messages <- vapply(fits[errors], `[[`, character(1), "error")
+      stop(
+        chr_name, " block failed for pair(s) ",
+        paste(failed, collapse = ", "), ": ",
+        paste(unique(messages), collapse = " | ")
       )
     }
-  }, warning = log_warning)
 
-  rm(Y_chr, Y_imp_chr)
-  gc(FALSE)
-
-  chr_sec <- as.numeric(difftime(Sys.time(), chr_start, units = "secs"))
-  chr_elapsed <- c(chr_elapsed, chr_sec)
-  mean_chr <- mean(chr_elapsed)
-  remaining <- total_chr - chr_idx
-  eta_sec <- remaining * mean_chr
-  cat(
-    sprintf(
-      "Completed %s in %.1f min | avg/chr %.1f min | ETA %.1f min\n",
-      chr_name, chr_sec / 60, mean_chr / 60, eta_sec / 60
+    block_result <- list(
+      chromosome = chr_name,
+      pair_ids = ids,
+      imputed = do.call(rbind, lapply(fits, `[[`, "mean")),
+      diagnostics = data.frame(
+        pair_id = vapply(fits, `[[`, integer(1), "pair_id"),
+        fit_status = vapply(fits, `[[`, character(1), "fit_status"),
+        min_ess_bulk = vapply(fits, `[[`, numeric(1), "min_ess_bulk"),
+        max_mcse_mean = vapply(fits, `[[`, numeric(1), "max_mcse_mean"),
+        error = vapply(fits, `[[`, character(1), "error"),
+        stringsAsFactors = FALSE
+      ),
+      prior_parameters = do.call(rbind, lapply(fits, `[[`, "prior")),
+      elapsed_seconds = as.numeric(
+        difftime(Sys.time(), started, units = "secs")
+      ),
+      prior_mapping = cfg$prior_mapping,
+      checkpoint_key = checkpoint_key
     )
+    rownames(block_result$imputed) <- as.character(ids)
+    colnames(block_result$imputed) <- colnames(input$Y)
+    rownames(block_result$prior_parameters) <- as.character(ids)
+
+    stopifnot(
+      identical(dim(block_result$imputed), c(length(ids), n_cells)),
+      all(is.finite(block_result$imputed)),
+      all(block_result$imputed >= 0)
+    )
+    saveRDS(block_result, block_file, compress = "gzip")
+    cat(
+      chr_name, ": saved block in",
+      round(block_result$elapsed_seconds, 1), "seconds.\n"
+    )
+  }
+
+  block_files <- file.path(
+    block_dir,
+    vapply(block_starts, function(first) {
+      last <- min(n_pairs, first + cfg$block_size - 1L)
+      paste0(
+        chr_name, "_", cfg$prior_mapping, "_fixed150_pairs_",
+        sprintf("%06d", first), "_", sprintf("%06d", last), ".rds"
+      )
+    }, character(1))
   )
+  stopifnot(all(file.exists(block_files)))
+  blocks <- lapply(block_files, read_checkpoint)
+
+  result <- list(
+    chromosome = chr_name,
+    imputed = do.call(rbind, lapply(blocks, `[[`, "imputed")),
+    diagnostics = do.call(rbind, lapply(blocks, `[[`, "diagnostics")),
+    prior_parameters = do.call(rbind, lapply(blocks, `[[`, "prior_parameters")),
+    prior_mapping = cfg$prior_mapping,
+    settings = cfg,
+    source_input = input_file,
+    checkpoint_key = checkpoint_key
+  )
+
+  stopifnot(
+    identical(dim(result$imputed), dim(input$Y)),
+    all(is.finite(result$imputed)),
+    all(result$imputed >= 0),
+    identical(result$diagnostics$pair_id, seq_len(n_pairs))
+  )
+  rownames(result$imputed) <- rownames(input$Y)
+  colnames(result$imputed) <- colnames(input$Y)
+
+  saveRDS(result, final_file, compress = "gzip")
+  cat(chr_name, ": saved complete fit to", final_file, "\n")
+  result
 }
 
-cat("HiCBZIP-N(M) imputation files written at:", imp_dir, "\n")
 
-bhzip_nm_scool <- file.path(out_root, "oocyte_zygote_bhzip_nm_1M.scool")
-run_score_cmd(c(
-  "cooler",
-  "--dset", "oocyte_zygote_bhzip_nm",
-  "--data_dir", imp_dir,
-  "--anchor_file", anchor_file,
-  "--reference", ref_subset_file,
-  "--resolution", "1M",
-  "--out", bhzip_nm_scool
-), "score cooler bhzip_nm")
+# ---- run_selected_chromosomes ----
+finite_min_or_na <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) NA_real_ else min(x)
+}
 
-cat("Built N(M) scool:", bhzip_nm_scool, "\n")
-cat("Raw scool for NM workspace:", raw_scool, "\n")
-cat("Reference:", ref_subset_file, "\n")
-cat("Total elapsed (min):", round(as.numeric(difftime(Sys.time(), run_start, units = "mins")), 1), "\n")
+finite_max_or_na <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) NA_real_ else max(x)
+}
 
-save_warning_snapshot()
-cat("Warning log file:", warning_log_file, "\n")
-cat("Warnings snapshot file:", warning_snapshot_file, "\n")
+fit_summaries <- vector("list", length(cfg$chromosomes))
+
+for (index in seq_along(cfg$chromosomes)) {
+  chr_name <- cfg$chromosomes[index]
+  cat("\n=====", chr_name, "=====\n")
+  fit <- fit_nm_chromosome(chr_name, cfg, mod)
+  fit_summaries[[index]] <- data.frame(
+    chromosome = chr_name,
+    pairs = nrow(fit$imputed),
+    cells = ncol(fit$imputed),
+    nonfinite = sum(!is.finite(fit$imputed)),
+    nonzero = sum(fit$imputed > 0),
+    structural_boundary_pairs = sum(
+      fit$diagnostics$fit_status == "structural-zero-boundary"
+    ),
+    mcmc_pairs = sum(fit$diagnostics$fit_status == "mcmc"),
+    minimum_ess_bulk = finite_min_or_na(fit$diagnostics$min_ess_bulk),
+    maximum_mcse_mean = finite_max_or_na(fit$diagnostics$max_mcse_mean),
+    prior_mapping = fit$prior_mapping,
+    stringsAsFactors = FALSE
+  )
+  rm(fit)
+  gc(FALSE)
+}
+
+fit_summaries <- do.call(rbind, fit_summaries)
+write.csv(
+  fit_summaries,
+  file.path(
+    output_dir,
+    "nm_fit_summary.csv"
+  ),
+  row.names = FALSE
+)
+fit_summaries

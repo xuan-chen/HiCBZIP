@@ -1,0 +1,670 @@
+---
+title: "Fixed-cohort full benchmark comparison"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+This notebook compares the corrected fixed-cohort HiCBZIP results with Raw,
+scHiCImpute, scHiCluster, Fast-Higashi, and Higashi. The manuscript comparison uses depth-matched inputs for HiCBZIP and scHiCImpute.
+
+The HiCBZIP and Raw results use the fixed 150-cell cohort. scHiCImpute uses
+only its 146 nonempty outputs and is labeled accordingly. The three integrated
+methods retain their established benchmark runs. Only load SCORE embedding
+pickles from trusted sources.
+
+## 1. Setup
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = TRUE)
+
+required_packages <- c(
+  "dplyr", "tidyr", "purrr", "tibble", "readr", "ggplot2",
+  "jsonlite", "reticulate", "hdf5r"
+)
+missing_packages <- required_packages[
+  !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
+]
+if (length(missing_packages) > 0L) {
+  stop("Missing R packages: ", paste(missing_packages, collapse = ", "))
+}
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(tibble)
+library(readr)
+library(ggplot2)
+
+result_root <- Sys.getenv("HICBZIP_SCORE_FIXED150_OUTPUT")
+reported_root <- Sys.getenv("HICBZIP_SCORE_REPORTED_RESULTS")
+reference_path <- Sys.getenv(
+  "HICBZIP_SCORE_PCA_REFERENCE",
+  unset = file.path(result_root, "metadata", "oocyte_zygote_ref_fixed150.tsv")
+)
+if (!nzchar(result_root) || !dir.exists(result_root) ||
+    !nzchar(reported_root) || !dir.exists(reported_root) ||
+    !file.exists(reference_path)) {
+  stop("Set HICBZIP_SCORE_FIXED150_OUTPUT and HICBZIP_SCORE_REPORTED_RESULTS ",
+       "to the fit/output root and the Raw/integrated SCORE result root, respectively.")
+}
+
+output_dir <- file.path(result_root, "manuscript_summaries")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+version_labels <- c(primary_depth_matched = "Depth matched")
+metric_levels <- c("best_ari", "best_nmi", "best_silhouette", "avgBio")
+metric_labels <- c(
+  best_ari = "(a) Best ARI", best_nmi = "(b) Best NMI",
+  best_silhouette = "(c) Best silhouette", avgBio = "(d) avgBio"
+)
+method_levels <- c(
+  "Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "scHiCImpute",
+  "scHiCluster", "Fast-Higashi", "Higashi"
+)
+method_colors <- c(
+  "Raw" = "#8A8A8A",
+  "HiCBZIP-GB(NB)" = "#D1495B",
+  "HiCBZIP-N(M)" = "#F4A261",
+  "scHiCImpute" = "#9AA44D",
+  "scHiCluster" = "#4C78A8",
+  "Fast-Higashi" = "#B279C8",
+  "Higashi" = "#7E57C2"
+)
+method_legend_labels <- c(
+  "Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "HiCImpute",
+  "scHiCluster", "Fast-Higashi", "Higashi"
+)
+pipeline_levels <- c(
+  "InnerProduct + Raw", "InnerProduct + HiCBZIP-GB(NB)",
+  "InnerProduct + HiCBZIP-N(M)", "InnerProduct + scHiCImpute",
+  "SnapATAC + Raw", "SnapATAC + HiCBZIP-GB(NB)",
+  "SnapATAC + HiCBZIP-N(M)", "SnapATAC + scHiCImpute",
+  "scHiCluster", "Fast-Higashi", "Higashi"
+)
+pipeline_labels <- c(
+  "InnerProduct + Raw" = "Raw",
+  "InnerProduct + HiCBZIP-GB(NB)" = "GB",
+  "InnerProduct + HiCBZIP-N(M)" = "NM",
+  "InnerProduct + scHiCImpute" = "HiCImpute",
+  "SnapATAC + Raw" = "Raw",
+  "SnapATAC + HiCBZIP-GB(NB)" = "GB",
+  "SnapATAC + HiCBZIP-N(M)" = "NM",
+  "SnapATAC + scHiCImpute" = "HiCImpute",
+  "scHiCluster" = "scHiCluster",
+  "Fast-Higashi" = "Fast-Higashi",
+  "Higashi" = "Higashi"
+)
+group_label_df <- tribble(
+  ~x, ~label,
+  2.5, "+InnerProduct",
+  6.5, "+SnapATAC",
+  10.0, "Integrated"
+)
+```
+
+## 2. Metric-file manifest
+
+```{r metric_helpers}
+metric_file <- function(version, workflow, method, run) {
+  run_id <- sprintf("%02d", run)
+  workflow_id <- tolower(workflow)
+  metric_name <- paste0(workflow_id, ".json")
+
+  if (method == "Raw") {
+    dataset <- if (workflow == "InnerProduct") {
+      paste0("oocyte_zygote_raw_nm_pairs_r", run_id)
+    } else {
+      paste0("oocyte_zygote_raw_nm_pairs_snapatac_no_idf_r", run_id)
+    }
+    return(file.path(
+      reported_root, "server_json_runs_nm", dataset,
+      "1M", workflow_id, metric_name
+    ))
+  }
+
+  if (method %in% c("HiCBZIP-GB(NB)", "HiCBZIP-N(M)")) {
+    model <- if (method == "HiCBZIP-GB(NB)") "gbnb" else "nm"
+    representation <- "depth_matched"
+    dataset <- paste0(
+      "oocyte_zygote_", model, "_", representation,
+      "_fixed150_", workflow_id, "_r", run_id
+    )
+    return(file.path(
+      result_root, "outputs/fixed150_score/external_imputation",
+      workflow_id, representation, model, "results", dataset,
+      "1M", workflow_id, metric_name
+    ))
+  }
+
+  if (method == "scHiCImpute") {
+    representation <- "depth_matched"
+    dataset <- paste0(
+      "oocyte_zygote_schicimpute_", representation,
+      "_complete146_", workflow_id, "_r", run_id
+    )
+    return(file.path(
+      result_root, "outputs/complete146_score/external_imputation",
+      workflow_id, representation, "schicimpute", "results", dataset,
+      "1M", workflow_id, metric_name
+    ))
+  }
+
+  stop("Unsupported external method: ", method)
+}
+
+integrated_file <- function(method, run) {
+  run_id <- sprintf("%02d", run)
+  if (method == "scHiCluster") {
+    return(file.path(
+      reported_root, "oocyte_zygote_schicluster_10runs",
+      paste0("oocyte_zygote_schicluster_r", run_id), "1M",
+      "schicluster%3Avc_sqrt_norm,convolution,random_walk",
+      "schicluster%3Avc_sqrt_norm,convolution,random_walk.json"
+    ))
+  }
+  if (method == "Fast-Higashi") {
+    return(file.path(
+      reported_root, "oocyte_zygote_fast_higashi_10runs",
+      paste0("oocyte_zygote_fast_higashi_r", run_id),
+      "1M/fast_higashi/fast_higashi.json"
+    ))
+  }
+  if (method == "Higashi") {
+    return(file.path(
+      reported_root, "oocyte_zygote_higashi_10runs",
+      paste0("oocyte_zygote_higashi_r", run_id),
+      "1M/higashi/higashi.json"
+    ))
+  }
+  stop("Unsupported integrated method: ", method)
+}
+```
+
+```{r metric_manifest}
+external_manifest <- crossing(
+  version = names(version_labels),
+  workflow = c("InnerProduct", "SnapATAC"),
+  method = c("Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "scHiCImpute"),
+  run = 1:10
+) %>%
+  mutate(
+    pipeline = paste(workflow, method, sep = " + "),
+    file = pmap_chr(
+      list(version, workflow, method, run), metric_file
+    )
+  )
+
+integrated_manifest <- crossing(
+  version = names(version_labels),
+  method = c("scHiCluster", "Fast-Higashi", "Higashi"),
+  run = 1:10
+) %>%
+  mutate(
+    workflow = "Integrated", pipeline = method,
+    file = map2_chr(method, run, integrated_file)
+  )
+
+metric_manifest <- bind_rows(external_manifest, integrated_manifest) %>%
+  mutate(
+    seed = 2025L + run,
+    exists = file.exists(file),
+    size_bytes = ifelse(exists, file.info(file)$size, NA_real_)
+  )
+
+print(metric_manifest %>% count(version, pipeline, exists), n = Inf)
+stopifnot(
+  nrow(metric_manifest) == 110L,
+  all(metric_manifest$exists), all(metric_manifest$size_bytes > 0)
+)
+
+write_csv(
+  metric_manifest,
+  file.path(output_dir, "full_benchmark_manifest_261031.csv")
+)
+```
+
+## 3. Metric tables and boxplots
+
+```{r metric_tables}
+first_numeric <- function(x, field, path) {
+  value <- suppressWarnings(as.numeric(x[[field]][1]))
+  if (length(value) != 1L || !is.finite(value)) {
+    stop("Missing or nonfinite ", field, " in ", path)
+  }
+  value
+}
+
+read_score_metrics <- function(path) {
+  value <- jsonlite::fromJSON(path, simplifyVector = TRUE)
+  ari <- first_numeric(value, "best_ari", path)
+  nmi <- first_numeric(value, "best_nmi", path)
+  silhouette <- first_numeric(value, "best_silhouette", path)
+  tibble(
+    best_ari = ari, best_nmi = nmi,
+    best_silhouette = silhouette,
+    avgBio = mean(c(ari, nmi, silhouette))
+  )
+}
+
+benchmark_metrics <- metric_manifest %>%
+  mutate(values = map(file, read_score_metrics)) %>%
+  select(version, workflow, pipeline, method, run, seed, values) %>%
+  unnest(values)
+
+benchmark_long <- benchmark_metrics %>%
+  pivot_longer(
+    cols = all_of(metric_levels),
+    names_to = "metric", values_to = "value"
+  ) %>%
+  mutate(
+    version = factor(version, levels = names(version_labels)),
+    pipeline = factor(pipeline, levels = pipeline_levels),
+    method = factor(method, levels = method_levels),
+    metric = factor(metric, levels = metric_levels)
+  )
+
+benchmark_summary <- benchmark_long %>%
+  group_by(version, workflow, pipeline, method, metric) %>%
+  summarize(
+    runs = n(), mean = mean(value), sd = sd(value),
+    minimum = min(value), maximum = max(value), .groups = "drop"
+  )
+
+benchmark_rankings <- benchmark_summary %>%
+  group_by(version, metric) %>%
+  arrange(desc(mean), .by_group = TRUE) %>%
+  mutate(rank_by_mean = row_number()) %>%
+  ungroup()
+
+print(benchmark_summary, n = Inf, width = Inf)
+print(
+  benchmark_rankings %>%
+    filter(rank_by_mean <= 5L) %>%
+    select(version, metric, rank_by_mean, pipeline, mean, sd),
+  n = Inf, width = Inf
+)
+
+write_csv(
+  benchmark_metrics,
+  file.path(output_dir, "full_benchmark_per_run_261031.csv")
+)
+write_csv(
+  benchmark_summary,
+  file.path(output_dir, "full_benchmark_summary_261031.csv")
+)
+write_csv(
+  benchmark_rankings,
+  file.path(output_dir, "full_benchmark_rankings_261031.csv")
+)
+```
+
+```{r metric_boxplots, fig.width=10.5, fig.height=3.2}
+make_metric_plot <- function(version_id) {
+  plot_data <- benchmark_long %>% filter(version == version_id)
+  ggplot(
+    plot_data,
+    aes(x = pipeline, y = value, fill = method, color = method)
+  ) +
+    geom_boxplot(
+      width = 0.68, alpha = 0.70, outlier.shape = NA, linewidth = 0.32
+    ) +
+    geom_point(
+      size = 0.55, alpha = 0.60,
+      position = position_jitter(width = 0.11, height = 0)
+    ) +
+    geom_vline(
+      xintercept = c(4.5, 8.5), linetype = "dashed",
+      color = "grey45", linewidth = 0.30
+    ) +
+    geom_text(
+      data = group_label_df,
+      aes(x = x, y = 1.015, label = label),
+      inherit.aes = FALSE, fontface = "bold", size = 2.25
+    ) +
+    facet_wrap(
+      ~metric, nrow = 1,
+      labeller = labeller(metric = metric_labels)
+    ) +
+    scale_x_discrete(
+      breaks = pipeline_levels,
+      labels = unname(pipeline_labels),
+      drop = FALSE, na.translate = FALSE
+    ) +
+    scale_fill_manual(
+      values = method_colors, breaks = method_levels,
+      labels = method_legend_labels, drop = FALSE
+    ) +
+    scale_color_manual(
+      values = method_colors, breaks = method_levels,
+      labels = method_legend_labels, drop = FALSE
+    ) +
+    coord_cartesian(ylim = c(0, 1), clip = "off") +
+    labs(x = NULL, y = "Value", fill = NULL, color = NULL) +
+    theme_classic(base_size = 8) +
+    theme(
+      plot.title = element_blank(),
+      strip.background = element_rect(fill = "grey95", color = NA),
+      strip.text = element_text(
+        face = "bold", size = 9,
+        margin = margin(t = 2, r = 2, b = 2, l = 2)
+      ),
+      panel.border = element_rect(
+        color = "black", fill = NA, linewidth = 0.45
+      ),
+      panel.spacing.x = grid::unit(0.10, "lines"),
+      axis.title.y = element_text(size = 8),
+      axis.text.y = element_text(size = 7),
+      axis.text.x = element_text(
+        size = 7, angle = 35, hjust = 1, vjust = 1
+      ),
+      axis.ticks.x = element_line(linewidth = 0.30),
+      legend.position = "right",
+      legend.text = element_text(size = 7),
+      legend.key.width = grid::unit(0.16, "in"),
+      legend.key.height = grid::unit(0.14, "in"),
+      legend.margin = margin(0, 0, 0, 2),
+      legend.box.margin = margin(0, 0, 0, 0),
+      plot.margin = margin(t = 8, r = 3, b = 2, l = 2)
+    ) +
+    guides(
+      fill = guide_legend(ncol = 1, byrow = TRUE),
+      color = "none"
+    )
+}
+
+p_metrics_primary <- make_metric_plot("primary_depth_matched")
+
+print(p_metrics_primary)
+
+ggsave(
+  file.path(output_dir, "full_benchmark_metrics_primary_261031.png"),
+  p_metrics_primary, width = 10.5, height = 3.2,
+  dpi = 600, bg = "white"
+)
+ggsave(
+  file.path(output_dir, "full_benchmark_metrics_primary_261031.pdf"),
+  p_metrics_primary, width = 10.5, height = 3.2, bg = "white"
+)
+```
+
+## 4. Run-1 PCA comparisons
+
+```{r pca_helpers, include=FALSE}
+read_reference <- function(path) {
+  value <- read_tsv(path, show_col_types = FALSE)
+  cell_column <- names(value)[1]
+  cluster_column <- if ("cluster" %in% names(value)) "cluster" else names(value)[2]
+  value %>%
+    transmute(
+      cell = as.character(.data[[cell_column]]),
+      cell_full = ifelse(grepl("\\.1M$", cell), cell, paste0(cell, ".1M")),
+      celltype = as.character(.data[[cluster_column]])
+    )
+}
+
+reference <- read_reference(reference_path)
+
+read_pickle_pca <- function(path) {
+  builtins <- reticulate::import_builtins(convert = FALSE)
+  pickle <- reticulate::import("pickle", convert = FALSE)
+  handle <- builtins$open(path, "rb")
+  on.exit(try(handle$close(), silent = TRUE), add = TRUE)
+  object <- pickle$load(handle)
+
+  z <- as.matrix(reticulate::py_to_r(object[["z"]]))
+  cells <- as.character(reticulate::py_to_r(object[["cell"]]))
+  if (nrow(z) != length(cells) && ncol(z) == length(cells)) z <- t(z)
+  stopifnot(nrow(z) == length(cells), ncol(z) >= 2L)
+
+  index <- match(cells, reference$cell_full)
+  if (anyNA(index)) {
+    index <- match(sub("\\.1M$", "", cells), sub("\\.1M$", "", reference$cell))
+  }
+  if (anyNA(index)) stop("Unmatched PCA cells in: ", path)
+
+  pca <- prcomp(z, center = TRUE, scale. = FALSE)
+  tibble(
+    PC1 = pca$x[, 1], PC2 = pca$x[, 2],
+    celltype = reference$celltype[index]
+  )
+}
+
+read_h5ad_obs_col <- function(obs_group, key) {
+  node <- obs_group[[key]]
+  if (inherits(node, "H5Group")) {
+    node_names <- names(node)
+    if (all(c("codes", "categories") %in% node_names)) {
+      codes <- as.integer(node[["codes"]]$read())
+      categories <- as.character(node[["categories"]]$read())
+      return(as.vector(categories[codes + 1L]))
+    }
+  }
+  if (inherits(node, "H5D")) {
+    values <- node$read()
+    attributes <- tryCatch(
+      hdf5r::h5attr_names(node),
+      error = function(e) character(0)
+    )
+    if ("categories" %in% attributes) {
+      categories_object <- hdf5r::h5attr(node, "categories")
+      categories <- as.character(
+        categories_object$dereference()[[1]]$read()
+      )
+      return(as.vector(categories[as.integer(values) + 1L]))
+    }
+    return(as.vector(as.character(values)))
+  }
+  stop("Unsupported H5AD obs encoding for: ", key)
+}
+
+read_h5ad_pca <- function(path) {
+  h5 <- hdf5r::H5File$new(path, mode = "r")
+  on.exit(h5$close_all(), add = TRUE)
+  z <- as.matrix(h5[["obsm"]][["X_pca"]]$read())
+  obs_names <- names(h5[["obs"]])
+  label_key <- if ("celltype" %in% obs_names) {
+    "celltype"
+  } else if ("cluster" %in% obs_names) {
+    "cluster"
+  } else {
+    obs_names[[1]]
+  }
+  celltype <- read_h5ad_obs_col(h5[["obs"]], label_key)
+  if (nrow(z) != length(celltype) && ncol(z) == length(celltype)) z <- t(z)
+  stopifnot(nrow(z) == length(celltype), ncol(z) >= 2L)
+  tibble(PC1 = z[, 1], PC2 = z[, 2], celltype = celltype)
+}
+
+pca_metric_to_embedding <- function(metric_path) {
+  file.path(dirname(metric_path), "embedding__0.pickle")
+}
+```
+
+```{r pca_manifest}
+pca_external <- crossing(
+  version = names(version_labels),
+  workflow = c("InnerProduct", "SnapATAC"),
+  method = c("Raw", "HiCBZIP-GB(NB)", "HiCBZIP-N(M)", "scHiCImpute")
+) %>%
+  mutate(
+    pipeline = paste(workflow, method, sep = " + "),
+    metric_file = pmap_chr(
+      list(version, workflow, method),
+      function(version, workflow, method) {
+        metric_file(version, workflow, method, 1L)
+      }
+    ),
+    source_type = "pickle",
+    file = map_chr(metric_file, pca_metric_to_embedding)
+  ) %>%
+  select(version, workflow, pipeline, method, source_type, file)
+
+pca_integrated_base <- tribble(
+  ~method, ~source_type, ~file,
+  "scHiCluster", "h5ad",
+  file.path(
+    reported_root, "oocyte_zygote_schicluster_10runs",
+    "oocyte_zygote_schicluster_r01/1M",
+    "schicluster%3Avc_sqrt_norm,convolution,random_walk/anndata_obj.h5ad"
+  ),
+  "Fast-Higashi", "pickle",
+  file.path(
+    reported_root, "oocyte_zygote_fast_higashi_10runs",
+    "oocyte_zygote_fast_higashi_r01/1M/fast_higashi/embedding__0.pickle"
+  ),
+  "Higashi", "pickle",
+  file.path(
+    reported_root, "oocyte_zygote_higashi_10runs",
+    "oocyte_zygote_higashi_r01/1M/higashi/embedding__0.pickle"
+  )
+)
+
+pca_integrated <- crossing(
+  version = names(version_labels),
+  pca_integrated_base
+) %>%
+  mutate(workflow = "Integrated", pipeline = method) %>%
+  select(version, workflow, pipeline, method, source_type, file)
+
+pca_manifest <- bind_rows(pca_external, pca_integrated) %>%
+  mutate(
+    exists = file.exists(file),
+    size_bytes = ifelse(exists, file.info(file)$size, NA_real_)
+  )
+
+print(pca_manifest, n = Inf, width = Inf)
+stopifnot(
+  nrow(pca_manifest) == 11L,
+  all(pca_manifest$exists), all(pca_manifest$size_bytes > 0)
+)
+```
+
+```{r pca_data}
+pca_data <- pca_manifest %>%
+  mutate(
+    coordinates = map2(
+      file, source_type,
+      ~ if (.y == "h5ad") read_h5ad_pca(.x) else read_pickle_pca(.x)
+    )
+  ) %>%
+  select(version, workflow, pipeline, method, coordinates) %>%
+  unnest(coordinates) %>%
+  group_by(version, workflow, pipeline, method) %>%
+  mutate(retained_cells = n()) %>%
+  ungroup() %>%
+  mutate(
+    method_label = recode(method, "scHiCImpute" = "HiCImpute"),
+    panel = case_when(
+      workflow == "Integrated" ~ paste0(
+        method_label, "\n(Integrated)\n(n=", retained_cells, ")"
+      ),
+      TRUE ~ paste0(
+        workflow, "\n", method_label, "\n(n=", retained_cells, ")"
+      )
+    )
+  )
+
+pca_counts <- pca_data %>%
+  distinct(version, workflow, pipeline, method, retained_cells)
+print(pca_counts, n = Inf)
+
+write_csv(
+  pca_counts,
+  file.path(output_dir, "full_benchmark_pca_cell_counts_261031.csv")
+)
+```
+
+```{r pca_plots, fig.width=15.0, fig.height=10.0}
+panel_order_for <- function(version_id) {
+  pca_data %>%
+    filter(version == version_id) %>%
+    distinct(pipeline, panel) %>%
+    mutate(pipeline = factor(pipeline, levels = pipeline_levels)) %>%
+    arrange(pipeline) %>%
+    pull(panel)
+}
+
+make_pca_plot <- function(version_id, title) {
+  panel_levels <- panel_order_for(version_id)
+  plot_data <- pca_data %>%
+    filter(version == version_id) %>%
+    mutate(panel = factor(panel, levels = panel_levels))
+
+  pca_axis_labels <- function(x) {
+    finite_x <- x[is.finite(x)]
+    if (length(finite_x) > 0L && max(abs(finite_x)) < 0.05) {
+      sprintf("%.1e", x)
+    } else {
+      sprintf("%.1f", x)
+    }
+  }
+
+  ggplot(plot_data, aes(PC1, PC2, color = celltype)) +
+    geom_point(size = 0.9, alpha = 0.85) +
+    facet_wrap(~panel, ncol = 4, scales = "free", drop = FALSE) +
+    scale_x_continuous(
+      breaks = scales::breaks_pretty(n = 4),
+      labels = pca_axis_labels
+    ) +
+    scale_y_continuous(
+      breaks = scales::breaks_pretty(n = 4),
+      labels = pca_axis_labels
+    ) +
+    labs(title = title, x = "PC1", y = "PC2", color = "Cell type") +
+    theme_classic(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_blank(),
+      strip.background = element_rect(
+        fill = "grey95", color = "black", linewidth = 0.8
+      ),
+      strip.text = element_text(face = "plain"),
+      panel.border = element_rect(
+        color = "black", fill = NA, linewidth = 0.8
+      ),
+      plot.title = element_text(face = "bold")
+    )
+}
+
+p_pca_primary <- make_pca_plot(
+  "primary_depth_matched",
+  "PCA embeddings across imputation and embedding pipelines"
+)
+
+print(p_pca_primary)
+
+ggsave(
+  file.path(output_dir, "full_benchmark_pca_primary_261031.png"),
+  p_pca_primary, width = 15.0, height = 10.0,
+  dpi = 300, bg = "white"
+)
+ggsave(
+  file.path(output_dir, "full_benchmark_pca_primary_261031.pdf"),
+  p_pca_primary, width = 15.0, height = 10.0, bg = "white"
+)
+```
+
+## 5. Output inventory
+
+```{r output_inventory}
+output_inventory <- list.files(
+  output_dir, recursive = TRUE, full.names = TRUE
+) %>%
+  tibble(file = .) %>%
+  mutate(
+    relative_file = substring(file, nchar(output_dir) + 2L),
+    size_bytes = file.info(file)$size,
+    md5 = unname(tools::md5sum(file))
+  ) %>%
+  select(relative_file, size_bytes, md5)
+
+print(output_inventory, n = Inf)
+write_csv(
+  output_inventory,
+  file.path(output_dir, "output_inventory_261031.csv")
+)
+cat("Output directory:", output_dir, "\n")
+```
